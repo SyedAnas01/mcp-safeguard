@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "mcp-shield"
+version = "0.1.0"
+description = "Security scanner for MCP servers — detect prompt injection, credential leaks, exposed endpoints, and tool poisoning"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "mcp-shield contributors" }]
+keywords = [
+    "mcp",
+    "security",
+    "ai-security",
+    "prompt-injection",
+    "model-context-protocol",
+    "llm-security",
+    "ai-agents",
+    "claude",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Typing :: Typed",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=0.9",
+    "mcp>=1.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "httpx>=0.25",
+    "rich>=13.0",
+    "typer>=0.9",
+    "python-dotenv>=1.0",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp>=1.20",
+    "prometheus-client>=0.18",
+]
+
+[project.optional-dependencies]
+dashboard = ["streamlit>=1.28"]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "black>=23.0",
+    "ruff>=0.1",
+    "build>=1.0",
+    "twine>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mcp-shield/mcp-shield"
+Repository = "https://github.com/mcp-shield/mcp-shield"
+"Bug Tracker" = "https://github.com/mcp-shield/mcp-shield/issues"
+Documentation = "https://github.com/mcp-shield/mcp-shield#readme"
+Changelog = "https://github.com/mcp-shield/mcp-shield/blob/main/CHANGELOG.md"
+
+[project.scripts]
+mcp-shield = "mcp_shield.server:mcp.run"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = ["E501", "B008", "UP007", "UP042"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mcp_shield"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]

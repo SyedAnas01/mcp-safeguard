@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  mcp-shield:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MCP_SHIELD_API_KEY: ${MCP_SHIELD_API_KEY:-}
+      MCP_SHIELD_LOG_LEVEL: INFO
+      MCP_SHIELD_PROMETHEUS_ENABLED: "true"
+      MCP_SHIELD_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+      MCP_SHIELD_REPORT_DIR: /tmp/mcp-shield-reports
+    volumes:
+      - reports:/tmp/mcp-shield-reports
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  dashboard:
+    build: .
+    command: ["python", "-m", "streamlit", "run", "src/mcp_shield/observability/dashboard.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      MCP_SHIELD_REPORT_DIR: /tmp/mcp-shield-reports
+    volumes:
+      - reports:/tmp/mcp-shield-reports
+    depends_on:
+      - mcp-shield
+    restart: unless-stopped
+
+volumes:
+  reports:
+  prometheus_data:
+  grafana_data:
