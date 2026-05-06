@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>mcp-safeguard — Security Scanner for MCP Servers</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --red:       #dc2626;
+      --red-dim:   #7f1d1d;
+      --red-glow:  rgba(220,38,38,0.15);
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --code-bg:   #010409;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.6;
+    }
+
+    a { color: var(--red); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── NAV ── */
+    nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav-logo {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .nav-logo .shield { color: var(--red); font-size: 1.3rem; }
+    .nav-links { display: flex; gap: 1.5rem; align-items: center; }
+    .nav-links a { color: var(--muted); font-size: 0.9rem; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+    /* ── HERO ── */
+    .hero {
+      text-align: center;
+      padding: 5rem 1.5rem 4rem;
+      background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(220,38,38,0.12), transparent);
+    }
+    .hero-badge {
+      display: inline-block;
+      background: var(--red-dim);
+      color: #fca5a5;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.3rem 0.9rem;
+      border-radius: 999px;
+      border: 1px solid var(--red);
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4.5rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 1rem;
+    }
+    .hero h1 span { color: var(--red); }
+    .hero p {
+      font-size: clamp(1.05rem, 2vw, 1.3rem);
+      color: var(--muted);
+      max-width: 560px;
+      margin: 0 auto 2.5rem;
+    }
+
+    /* ── INSTALL BOX ── */
+    .install-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      max-width: 480px;
+      margin: 0 auto 2rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--code-bg);
+      box-shadow: 0 0 0 4px var(--red-glow);
+    }
+    .install-prompt {
+      padding: 0.9rem 1rem 0.9rem 1.2rem;
+      color: var(--red);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.85rem;
+      user-select: none;
+    }
+    .install-cmd {
+      flex: 1;
+      padding: 0.9rem 0;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 1rem;
+      color: #7ee787;
+      background: transparent;
+      border: none;
+      outline: none;
+      cursor: default;
+    }
+    .copy-btn {
+      background: var(--surface);
+      border: none;
+      border-left: 1px solid var(--border);
+      color: var(--muted);
+      padding: 0.9rem 1.1rem;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: background 0.15s, color 0.15s;
+    }
+    .copy-btn:hover { background: var(--border); color: var(--text); }
+    .copy-btn.copied { color: #7ee787; }
+
+    /* ── STAR BADGE ── */
+    .badge-row {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .badge-row a { display: inline-flex; }
+    .badge-row img { height: 24px; }
+
+    /* ── STATS BAR ── */
+    .stats-bar {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 1.5rem;
+      overflow-x: auto;
+    }
+    .stats-inner {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 0;
+      flex-wrap: nowrap;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 2.5rem;
+      border-right: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .stat-item:last-child { border-right: none; }
+    .stat-num {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--red);
+      line-height: 1;
+    }
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.2rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── FEATURES ── */
+    .features {
+      padding: 4rem 1.5rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .section-title {
+      text-align: center;
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .section-sub {
+      text-align: center;
+      color: var(--muted);
+      margin-bottom: 3rem;
+      font-size: 1rem;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 1.25rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.75rem 1.5rem;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .card:hover {
+      border-color: var(--red);
+      box-shadow: 0 0 20px var(--red-glow);
+    }
+    .card-icon {
+      font-size: 2rem;
+      margin-bottom: 0.9rem;
+    }
+    .card h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 0.6rem;
+    }
+    .card p {
+      font-size: 0.88rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .card-tag {
+      display: inline-block;
+      margin-top: 1rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--red);
+      background: var(--red-dim);
+      border-radius: 4px;
+      padding: 0.2rem 0.55rem;
+    }
+
+    /* ── HOW IT WORKS ── */
+    .how {
+      padding: 4rem 1.5rem;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .how-inner { max-width: 800px; margin: 0 auto; }
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      margin-top: 2rem;
+    }
+    .step {
+      display: flex;
+      gap: 1.25rem;
+      align-items: flex-start;
+    }
+    .step-num {
+      flex-shrink: 0;
+      width: 2rem;
+      height: 2rem;
+      background: var(--red);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.85rem;
+      margin-top: 0.15rem;
+    }
+    .step-body h4 { font-size: 1rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .step-body p { font-size: 0.88rem; color: var(--muted); }
+    .step-code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.85rem;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-top: 0.5rem;
+      overflow-x: auto;
+      color: #7ee787;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 2.5rem 1.5rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--text); text-decoration: none; }
+    .footer-links { display: flex; justify-content: center; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap; }
+
+    @media (max-width: 600px) {
+      nav { padding: 0.75rem 1rem; }
+      .nav-links { gap: 1rem; }
+      .hero { padding: 3.5rem 1rem 3rem; }
+      .install-cmd { font-size: 0.88rem; }
+      .stat-item { padding: 0 1.25rem; }
+      .stat-num { font-size: 1.2rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">
+    <span class="shield">🛡</span> mcp-safeguard
+  </div>
+  <div class="nav-links">
+    <a href="https://github.com/SyedAnas01/mcp-safeguard" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/SyedAnas01/mcp-safeguard/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
+    <a href="https://pypi.org/project/mcp-safeguard/" target="_blank" rel="noopener">PyPI</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">Open Source Security Tool</div>
+  <h1><span>mcp-safeguard</span></h1>
+  <p>The security scanner for MCP servers — detect prompt injection, exposed credentials, endpoint risks, and tool poisoning before they reach production.</p>
+
+  <div class="install-wrap">
+    <span class="install-prompt">$</span>
+    <span class="install-cmd" id="install-text">pip install mcp-safeguard</span>
+    <button class="copy-btn" id="copy-btn" title="Copy to clipboard" onclick="copyInstall()">📋</button>
+  </div>
+
+  <div class="badge-row">
+    <a href="https://github.com/SyedAnas01/mcp-safeguard" target="_blank" rel="noopener">
+      <img src="https://img.shields.io/github/stars/SyedAnas01/mcp-safeguard?style=social" alt="GitHub Stars" />
+    </a>
+    <a href="https://pypi.org/project/mcp-safeguard/" target="_blank" rel="noopener">
+      <img src="https://img.shields.io/pypi/v/mcp-safeguard?color=dc2626&label=PyPI" alt="PyPI version" />
+    </a>
+    <a href="https://github.com/SyedAnas01/mcp-safeguard/blob/main/LICENSE" target="_blank" rel="noopener">
+      <img src="https://img.shields.io/github/license/SyedAnas01/mcp-safeguard?color=dc2626" alt="License" />
+    </a>
+  </div>
+</section>
+
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stats-inner">
+    <div class="stat-item">
+      <span class="stat-num">15+</span>
+      <span class="stat-label">Injection Rules</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num">17</span>
+      <span class="stat-label">Credential Patterns</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num">28</span>
+      <span class="stat-label">Endpoint Probes</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num">73</span>
+      <span class="stat-label">Tests</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num">CVSS</span>
+      <span class="stat-label">Severity Scoring</span>
+    </div>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section class="features">
+  <h2 class="section-title">What it catches</h2>
+  <p class="section-sub">Four critical attack surfaces scanned automatically on every run.</p>
+  <div class="cards">
+
+    <div class="card">
+      <div class="card-icon">💉</div>
+      <h3>Prompt Injection Detection</h3>
+      <p>Identifies tool descriptions, parameter names, and response bodies that attempt to hijack LLM behavior through embedded instructions.</p>
+      <span class="card-tag">15+ rules</span>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">🔑</div>
+      <h3>Credential Scanning</h3>
+      <p>Detects hardcoded API keys, tokens, passwords, and secrets across tool schemas and server responses before they leak to users.</p>
+      <span class="card-tag">17 patterns</span>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">🌐</div>
+      <h3>Endpoint Exposure</h3>
+      <p>Probes for unauthenticated admin routes, debug endpoints, and over-permissive CORS policies that attackers can pivot through.</p>
+      <span class="card-tag">28 probes</span>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">☠️</div>
+      <h3>Tool Poisoning</h3>
+      <p>Catches maliciously crafted tool definitions that abuse agent trust to execute unauthorized actions or exfiltrate data silently.</p>
+      <span class="card-tag">CVSS scored</span>
+    </div>
+
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how">
+  <div class="how-inner">
+    <h2 class="section-title">Get started in 60 seconds</h2>
+    <p class="section-sub">Install, point, scan.</p>
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h4>Install from PyPI</h4>
+          <div class="step-code">pip install mcp-safeguard</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h4>Run a scan against your MCP server</h4>
+          <div class="step-code">mcp-safeguard scan http://localhost:8000</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h4>Review findings with CVSS scores</h4>
+          <p>Results are printed to stdout and optionally exported as JSON or SARIF for CI integration.</p>
+          <div class="step-code">mcp-safeguard scan http://localhost:8000 --output report.json</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-links">
+    <a href="https://github.com/SyedAnas01/mcp-safeguard" target="_blank" rel="noopener">GitHub Repository</a>
+    <a href="https://github.com/SyedAnas01/mcp-safeguard/issues" target="_blank" rel="noopener">Report an Issue</a>
+    <a href="https://github.com/SyedAnas01/mcp-safeguard/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+    <a href="https://github.com/SyedAnas01/mcp-safeguard/blob/main/SECURITY.md" target="_blank" rel="noopener">Security Policy</a>
+    <a href="https://pypi.org/project/mcp-safeguard/" target="_blank" rel="noopener">PyPI</a>
+  </div>
+  <p>Released under the MIT License &nbsp;·&nbsp; Built for the MCP security community</p>
+</footer>
+
+<script>
+  function copyInstall() {
+    const text = document.getElementById('install-text').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = document.getElementById('copy-btn');
+      btn.textContent = '✅';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = '📋'; btn.classList.remove('copied'); }, 2000);
+    });
+  }
+</script>
+
+</body>
+</html>
