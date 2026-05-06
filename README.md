@@ -2,7 +2,7 @@
 
 **The security scanner for MCP servers — detect prompt injection, credential leaks, exposed endpoints, and tool poisoning before they reach production.**
 
-[![CI](https://github.com/mcp-shield/mcp-shield/actions/workflows/ci.yml/badge.svg)](https://github.com/mcp-shield/mcp-shield/actions)
+[![CI](https://github.com/SyedAnas01/mcp-safeguard/actions/workflows/ci.yml/badge.svg)](https://github.com/SyedAnas01/mcp-safeguard/actions)
 [![PyPI version](https://badge.fury.io/py/mcp-shield.svg)](https://badge.fury.io/py/mcp-shield)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -103,7 +103,7 @@ docker run -p 8000:8000 mcpshield/mcp-shield:latest
 ### Docker Compose (with Prometheus + Grafana + Dashboard)
 
 ```bash
-git clone https://github.com/mcp-shield/mcp-shield
+git clone https://github.com/SyedAnas01/mcp-safeguard
 cd mcp-shield
 cp .env.example .env
 docker compose up
@@ -480,7 +480,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and PR
 
 **Quick start for contributors:**
 ```bash
-git clone https://github.com/mcp-shield/mcp-shield
+git clone https://github.com/SyedAnas01/mcp-safeguard
 cd mcp-shield
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"

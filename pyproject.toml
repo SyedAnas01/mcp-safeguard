@@ -60,11 +60,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/SyedAnas01/mcp-shield"
-Repository = "https://github.com/SyedAnas01/mcp-shield"
-"Bug Tracker" = "https://github.com/SyedAnas01/mcp-shield/issues"
-Documentation = "https://github.com/SyedAnas01/mcp-shield#readme"
-Changelog = "https://github.com/SyedAnas01/mcp-shield/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/SyedAnas01/mcp-safeguard"
+Repository = "https://github.com/SyedAnas01/mcp-safeguard"
+"Bug Tracker" = "https://github.com/SyedAnas01/mcp-safeguard/issues"
+Documentation = "https://github.com/SyedAnas01/mcp-safeguard#readme"
+Changelog = "https://github.com/SyedAnas01/mcp-safeguard/blob/main/CHANGELOG.md"
 
 [project.scripts]
 mcp-safeguard = "mcp_shield.server:mcp.run"
