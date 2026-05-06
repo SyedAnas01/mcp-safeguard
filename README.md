@@ -91,7 +91,7 @@ The MCP (Model Context Protocol) ecosystem is growing fast — but security tool
 ### pip
 
 ```bash
-pip install mcpshield
+pip install mcp-guard
 ```
 
 ### Docker
@@ -159,7 +159,7 @@ Add to `.cursor/mcp.json` in your project:
 
 ```bash
 # Install
-pip install mcpshield
+pip install mcp-guard
 
 # Run server (stdio transport)
 fastmcp run src/mcp_shield/server.py

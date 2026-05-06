@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mcpshield"
+name = "mcp-guard"
 version = "0.1.0"
 description = "Security scanner for MCP servers — detect prompt injection, credential leaks, exposed endpoints, and tool poisoning"
 readme = "README.md"
@@ -67,7 +67,7 @@ Documentation = "https://github.com/SyedAnas01/mcp-shield#readme"
 Changelog = "https://github.com/SyedAnas01/mcp-shield/blob/main/CHANGELOG.md"
 
 [project.scripts]
-mcpshield = "mcp_shield.server:mcp.run"
+mcp-guard = "mcp_shield.server:mcp.run"
 mcp-shield = "mcp_shield.server:mcp.run"
 
 [tool.setuptools.packages.find]
