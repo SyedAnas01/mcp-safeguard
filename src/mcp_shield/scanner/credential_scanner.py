@@ -255,7 +255,42 @@ def scan_for_credentials(config: dict[str, Any]) -> list[CredentialFinding]:
 
     # Check env section specifically
     env_vars = config.get("env", {})
+
+    # Sensitive env var name patterns (flag by name regardless of value)
+    _SENSITIVE_ENV_NAMES: list[tuple[str, str, str, float]] = [
+        (r"(?i)(stripe.*(key|secret|token)|stripe_secret)", "CRED-018", "Stripe Credential in Environment", 8.5),
+        (r"(?i)(openai.*(key|secret|token)|openai_api_key)", "CRED-019", "OpenAI Credential in Environment", 8.5),
+        (r"(?i)(anthropic.*(key|secret|token)|claude_api_key)", "CRED-020", "Anthropic Credential in Environment", 8.5),
+        (r"(?i)(twilio.*(sid|token|secret)|twilio_auth)", "CRED-021", "Twilio Credential in Environment", 7.5),
+        (r"(?i)(sendgrid.*(key|token)|sendgrid_api)", "CRED-022", "SendGrid Credential in Environment", 7.5),
+        (r"(?i)(slack.*(token|secret|webhook)|slack_bot_token)", "CRED-023", "Slack Credential in Environment", 7.5),
+        (r"(?i)(github.*(token|pat|key)|gh_token|github_token)", "CRED-024", "GitHub Credential in Environment", 8.0),
+        (r"(?i)(aws.*(access.*key|secret.*key)|aws_access_key_id|aws_secret)", "CRED-025", "AWS Credential in Environment", 9.5),
+    ]
+
     for key, value in env_vars.items():
+        # Check by env var name (catches redacted/placeholder values too)
+        for name_pattern, rule_id, title, cvss_score in _SENSITIVE_ENV_NAMES:
+            if re.search(name_pattern, key, re.IGNORECASE):
+                # Only flag if value looks like a real secret (not a reference like ${VAR} or empty)
+                val_str = str(value) if value else ""
+                is_reference = bool(re.match(r"^\$\{?[A-Z_]+\}?$", val_str))
+                if val_str and not is_reference:
+                    findings.append(
+                        CredentialFinding(
+                            rule_id=f"{rule_id}-NAME",
+                            severity=Severity.HIGH,
+                            title=f"{title} (by name)",
+                            description=f"Env var '{key}' name indicates a hardcoded credential.",
+                            location=f"env.{key}",
+                            evidence=_mask_credential(val_str) if len(val_str) > 4 else "[set]",
+                            remediation="Use a secrets manager (AWS Secrets Manager, HashiCorp Vault) instead of inline env vars.",
+                            cvss_score=cvss_score,
+                        )
+                    )
+                break  # one match per key is enough
+
+        # Check by value pattern
         if isinstance(value, str) and len(value) > 5:
             for pattern, severity, rule_id, title, cvss_score in _CREDENTIAL_PATTERNS:
                 if re.search(pattern, value, re.IGNORECASE):
