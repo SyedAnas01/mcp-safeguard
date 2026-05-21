@@ -63,4 +63,6 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - GitHub Actions publish workflow (PyPI + Docker Hub on release)
 - 50+ test cases across 4 test modules
 
-[0.1.0]: https://github.com/mcp-shield/mcp-shield/releases/tag/v0.1.0
+[Unreleased]: https://github.com/SyedAnas01/mcp-safeguard/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/SyedAnas01/mcp-safeguard/releases/tag/v0.2.0
+[0.1.0]: https://github.com/SyedAnas01/mcp-safeguard/releases/tag/v0.1.0
