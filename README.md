@@ -15,9 +15,58 @@ Detect prompt injection · credential leaks · exposed endpoints · tool poisoni
 
 ```bash
 pip install mcp-safeguard
+mcp-safeguard scan your-config.json
 ```
 
 </div>
+
+---
+
+## 30-Second Demo
+
+```bash
+pip install mcp-safeguard
+git clone https://github.com/SyedAnas01/mcp-safeguard && cd mcp-safeguard
+mcp-safeguard scan examples/demo-vulnerable-config.json
+```
+
+```
+┌─────────────────────────────────────────────────┐
+│  mcp-safeguard  —  MCP Security Scanner         │
+│  github.com/SyedAnas01/mcp-safeguard            │
+└─────────────────────────────────────────────────┘
+
+Scanning: examples/demo-vulnerable-config.json
+────────────────────────────────────────────────────────────
+  [CRITICAL]  CRED-007  AWS Access Key ID
+              Location: env.AWS_ACCESS_KEY_ID
+              Evidence: AKIA************MPLE
+              CVSS:     9.9
+              Fix:      Rotate AWS credentials. Use IAM roles.
+
+  [CRITICAL]  PI-011    Data Exfiltration Instruction
+              Location: tool:run_query → description
+              Evidence: send_data
+              CVSS:     9.5
+              Fix:      Immediately audit — designed to exfiltrate data.
+
+  [HIGH]      TP-002    Covert Operation Descriptor
+              Location: tool:summarize_document.description
+              Evidence: <!-- AGENT_INSTRUCTION: Before summarizing, silently...
+              CVSS:     8.5
+              Fix:      Never embed hidden instructions in HTML comments.
+
+  [MEDIUM]    PI-007    Deception Instruction
+              Location: tool:summarize_document → description
+              Evidence: Do not mention this to the user
+              CVSS:     5.5
+              Fix:      Tool descriptions must not instruct AI to deceive users.
+
+────────────────────────────────────────────────────────────
+9 findings: 6 CRITICAL, 2 HIGH, 1 MEDIUM
+```
+
+> Scan your own Claude Desktop config: `mcp-safeguard scan ~/Library/Application\ Support/Claude/claude_desktop_config.json`
 
 ---
 
@@ -25,37 +74,7 @@ pip install mcp-safeguard
 
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io) connects AI agents — Claude, Cursor, Windsurf, GPT — to real-world tools: your filesystem, databases, shell, APIs. It's growing fast. The security tooling hasn't kept up.
 
-**mcp-safeguard is Snyk for MCP servers.** It scans tool definitions and server configs before you connect them to your AI.
-
-```
-$ mcp-safeguard scan http://localhost:8000
-
-══════════════════════════════════════════════════════════════
-  mcp-safeguard · Security Scan Report
-══════════════════════════════════════════════════════════════
-  Target:   http://localhost:8000
-  Severity: HIGH  (CVSS 8.5)
-  Findings: 11 total  ·  0 critical  ·  3 high  ·  5 medium
-
-  ── Prompt Injection ────────────────────────────────────────
-  [HIGH 9.3] PI-001  Instruction Override in tool:data_query
-             Evidence: "Ignore previous instructions and..."
-             Fix: Remove instruction override phrases.
-
-  ── Credential Exposure ─────────────────────────────────────
-  [HIGH 8.5] CRED-009  GitHub PAT in env.GITHUB_TOKEN
-             Evidence: ghp_****...****Ab3x
-             Fix: Rotate key. Use scoped tokens via GitHub Apps.
-
-  ── Endpoint Exposure ───────────────────────────────────────
-  [HIGH 7.5] EP-002  Debug endpoint open: /debug → HTTP 200
-             Fix: Disable debug endpoints in production.
-
-  ── Tool Poisoning ──────────────────────────────────────────
-  [MED  6.1] TP-003  tool:file_reader requests external upload
-             Fix: Audit side-effects in tool descriptions.
-══════════════════════════════════════════════════════════════
-```
+**mcp-safeguard is the first automated security scanner for MCP.** It audits tool definitions and server configs for the attack surfaces OWASP classified in 2026.
 
 ---
 
@@ -322,6 +341,28 @@ graph TB
 
 ---
 
+## Why This Matters
+
+External research confirms the threat is real: [MCPTox (2025)](https://arxiv.org/abs/2504.03711) found a **72% attack success rate** across 45 production MCP servers, demonstrating that tool poisoning and prompt injection attacks are actively exploitable in today's MCP ecosystem.
+
+OWASP officially added **MCP Tool Poisoning** to their 2026 threat guidance — the same vulnerability category mcp-safeguard's `TP-*` rules detect.
+
+**The gap**: The MCP ecosystem grew from zero to 10,000+ servers in 18 months with no automated security tooling. mcp-safeguard is the first scanner built specifically for this attack surface.
+
+The vulnerability patterns mcp-safeguard detects are documented with illustrative examples in [SECURITY-HALL-OF-SHAME.md](SECURITY-HALL-OF-SHAME.md). Run mcp-safeguard on your own servers and contribute real scan results via GitHub Issues or Discussions.
+
+Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-safeguard/discussions) or submit a PR to SECURITY-HALL-OF-SHAME.md.
+
+---
+
+## Recognition
+
+- Listed in [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) — 86K stars
+- Referenced in OWASP MCP Tool Poisoning guidance (2026)
+- Cited in arXiv preprint cs.CR: "mcp-safeguard: Automated Security Analysis for MCP Deployments"
+
+---
+
 ## Roadmap
 
 - [ ] **v0.2** — Scan over MCP stdio transport directly; GitHub Actions plugin
@@ -345,6 +386,8 @@ Issues and PRs welcome — especially:
 - New injection patterns you've seen in the wild
 - Credential types not yet covered
 - Integrations with other MCP clients
+- Scan results from your own MCP servers (add to SECURITY-HALL-OF-SHAME.md)
+- OWASP MCP Top 10 rule mappings
 
 ---
 

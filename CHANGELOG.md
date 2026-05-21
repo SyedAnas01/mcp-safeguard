@@ -7,6 +7,23 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-21
+
+### Added
+- **Standalone CLI** (`mcp-safeguard scan <config.json>`) — no AI client required
+  - Scans Claude Desktop config format (`mcpServers` JSON) and raw tool definition arrays
+  - Colored terminal output with CVSS scores and remediation steps
+  - `--severity` flag to filter findings by minimum severity
+  - `--fail-on` flag for CI/CD integration (exits non-zero if severity threshold breached)
+  - `--output <file>` flag for HTML or JSON report files
+  - `--format json` flag for machine-readable output
+- **Demo vulnerable config** (`examples/demo-vulnerable-config.json`) for testing and demos
+- **Examples directory** with usage documentation
+
+### Changed
+- `mcp-safeguard` command now runs the CLI scanner (was: MCP server runner)
+- `mcp-shield` command continues to run the MCP server
+
 ## [0.1.0] — 2026-05-06
 
 ### Added
