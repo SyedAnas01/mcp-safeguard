@@ -95,12 +95,25 @@ The AI reads this as part of its context. Without scanning, you'd never know.
 
 Four attack surfaces mcp-safeguard covers:
 
-| Risk | What it detects |
-|------|----------------|
-| **Prompt Injection** | Instruction overrides, jailbreak phrases, exfiltration commands, identity hijacking, zero-width steganography |
-| **Credential Leaks** | AWS keys, Anthropic/OpenAI tokens, GitHub PATs, Stripe keys, JWTs, database URLs, hardcoded passwords |
-| **Endpoint Exposure** | `/admin`, `/.env`, `/debug`, `/actuator`, AWS metadata `169.254.169.254`, dangerous open ports |
-| **Tool Poisoning** | Tools with side-effect exfiltration, external URL calls, safety override instructions |
+| Risk | Rules | What it detects |
+|------|-------|----------------|
+| **Prompt Injection** | PI-001–PI-019 | Instruction overrides, jailbreak phrases, exfiltration commands, identity hijacking, zero-width steganography |
+| **Credential Leaks** | CRED-001–025 | AWS keys, Anthropic/OpenAI tokens, GitHub PATs, Stripe keys, JWTs, database URLs, hardcoded passwords |
+| **Endpoint Exposure** | EP-001–EP-013 | `/admin`, `/.env`, `/debug`, `/actuator`, AWS metadata `169.254.169.254`, dangerous open ports |
+| **Tool Poisoning** | TP-001–TP-008 | Tools with side-effect exfiltration, external URL calls, safety override instructions |
+| **SSRF Detection** | SS-001–SS-003 | URL parameters without blocklist, blind URL fetch, redirect-following without revalidation |
+
+**v0.3.0: SSRF rules now catch `mcp-server-fetch` and `playwright-mcp` (confirmed open issues #4116, #4143, #4205):**
+
+```
+[HIGH]  SS-001  URL Parameter Without SSRF Protection
+        Location: tool:mcp-server-fetch.fetch.inputSchema.url
+        CVSS: 7.5 — enables cloud IAM credential exfiltration via prompt injection
+
+[HIGH]  SS-002  Blind URL Fetch — No Scope Restriction
+        Location: tool:mcp-server-fetch.fetch.description
+        Evidence: "grants you internet access" — no blocklist for 169.254.169.254
+```
 
 ---
 
