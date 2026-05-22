@@ -2,6 +2,22 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.3.0] - 2026-05-22
+### Added
+- **SSRF detection module** (`ssrf_scanner.py`): 3 new rules for Server-Side Request Forgery
+  - `SS-001` — URL parameter with no allowlist/blocklist protection (CVSS 7.5 HIGH)
+  - `SS-002` — Blind URL fetch with no scope restriction in description (CVSS 7.5–8.5 HIGH)
+  - `SS-003` — Redirect following without revalidation risk (CVSS 6.5 MEDIUM)
+- SSRF rules detect vulnerable patterns in production MCP servers:
+  - `mcp-server-fetch` (Anthropic reference, 86K-star repo) — confirmed SS-001, SS-002
+  - `playwright-mcp` (Microsoft, 33K stars) — confirmed SS-001
+  - Any tool accepting unconstrained `url`, `uri`, `endpoint`, `webhook`, `callback` parameters
+- Detection covers CVE class: cloud IAM credential exfiltration via prompt injection on AWS/GCP/Azure
+
+### Context
+- Motivated by open SSRF issues in modelcontextprotocol/servers (#4116, #4143, #4205)
+- Added attribution comment on PR #4205 identifying `get_prompt` handler as SSRF bypass path
+
 ## [0.2.0] - 2026-05-15
 ### Added
 - **Tool Poisoning detection** (8 new rules): Identifies malicious tool definitions that masquerade as legitimate MCP tools
