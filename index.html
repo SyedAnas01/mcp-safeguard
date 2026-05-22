@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mcp-safeguard — MCP Security Scanner</title>
+<meta name="description" content="The first automated security scanner for Model Context Protocol (MCP) servers. 52 detection rules across prompt injection, credential exposure, endpoint exposure, and tool poisoning.">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; line-height: 1.6; }
+.hero { background: linear-gradient(135deg, #161b22 0%, #0d1117 100%); padding: 80px 20px; text-align: center; border-bottom: 1px solid #30363d; }
+.hero h1 { font-size: 3rem; color: #f0f6fc; margin-bottom: 16px; }
+.hero h1 span { color: #58a6ff; }
+.hero p { font-size: 1.25rem; color: #8b949e; max-width: 600px; margin: 0 auto 32px; }
+.badge-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 32px; }
+.btn { display: inline-block; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 1rem; transition: all 0.2s; }
+.btn-primary { background: #238636; color: white; border: 1px solid #2ea043; }
+.btn-primary:hover { background: #2ea043; }
+.btn-secondary { background: #21262d; color: #e6edf3; border: 1px solid #30363d; }
+.btn-secondary:hover { background: #30363d; }
+.install-box { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px 24px; margin: 32px auto; max-width: 500px; font-family: 'Courier New', monospace; color: #79c0ff; font-size: 1.1rem; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px; max-width: 900px; margin: 60px auto; padding: 0 20px; }
+.stat-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 24px; text-align: center; }
+.stat-number { font-size: 2.5rem; font-weight: 700; color: #58a6ff; }
+.stat-label { color: #8b949e; margin-top: 8px; }
+.categories { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+.categories h2 { font-size: 1.8rem; margin-bottom: 32px; text-align: center; color: #f0f6fc; }
+.cat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+.cat-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 24px; }
+.cat-card h3 { color: #f0f6fc; margin-bottom: 12px; }
+.cat-card p { color: #8b949e; font-size: 0.9rem; }
+.cat-badge { display: inline-block; background: #1f6feb; color: white; border-radius: 20px; padding: 2px 10px; font-size: 0.8rem; margin-bottom: 12px; }
+.coverage { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+.press { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 32px; max-width: 700px; margin: 40px auto; }
+.press h2 { color: #f0f6fc; margin-bottom: 20px; }
+.press-item { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; color: #8b949e; }
+.press-item a { color: #58a6ff; text-decoration: none; }
+footer { border-top: 1px solid #30363d; padding: 32px 20px; text-align: center; color: #8b949e; }
+footer a { color: #58a6ff; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>🛡️ <span>mcp-safeguard</span></h1>
+  <p>The first automated security scanner for Model Context Protocol (MCP) servers. Detect vulnerabilities before deployment.</p>
+  <div class="badge-row">
+    <img src="https://badge.fury.io/py/mcp-safeguard.svg" alt="PyPI version">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License">
+    <img src="https://img.shields.io/badge/rules-52-green.svg" alt="52 Rules">
+  </div>
+  <div class="install-box">$ pip install mcp-safeguard</div>
+  <div style="display:flex;gap:12px;justify-content:center;">
+    <a href="https://github.com/SyedAnas01/mcp-safeguard" class="btn btn-primary">View on GitHub</a>
+    <a href="https://pypi.org/project/mcp-safeguard/" class="btn btn-secondary">PyPI Package</a>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat-card">
+    <div class="stat-number">52</div>
+    <div class="stat-label">Detection Rules</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">4</div>
+    <div class="stat-label">Attack Categories</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">46%</div>
+    <div class="stat-label">Servers with High/Critical Findings</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">&lt;2s</div>
+    <div class="stat-label">Scan Time (10K-line server)</div>
+  </div>
+</div>
+
+<div class="categories">
+  <h2>Detection Coverage</h2>
+  <div class="cat-grid">
+    <div class="cat-card">
+      <div class="cat-badge">19 rules</div>
+      <h3>🔴 Prompt Injection</h3>
+      <p>PI-001–PI-019: Detects instructions in tool outputs that override AI behavior, role assignment attacks, and context manipulation.</p>
+    </div>
+    <div class="cat-card">
+      <div class="cat-badge">25 patterns</div>
+      <h3>🟠 Credential Exposure</h3>
+      <p>Identifies API keys, OAuth tokens, AWS credentials, and other secrets exposed through tool responses.</p>
+    </div>
+    <div class="cat-card">
+      <div class="cat-badge">40 probes</div>
+      <h3>🟡 Endpoint Exposure</h3>
+      <p>28 probes + 12 port checks for SSRF vulnerabilities via unrestricted URL navigation in browser and network tools.</p>
+    </div>
+    <div class="cat-card">
+      <div class="cat-badge">8 rules</div>
+      <h3>🔵 Tool Poisoning</h3>
+      <p>Detects malicious tool definitions that masquerade as legitimate MCP tools, including name spoofing and hidden functionality.</p>
+    </div>
+  </div>
+</div>
+
+<div class="press">
+  <h2>📰 Coverage & Recognition</h2>
+  <div class="press-item">📰 <a href="https://news.ycombinator.com/item?id=48242541">Hacker News</a> — "MCP-safeguard: Automated security scanner for MCP servers"</div>
+  <div class="press-item">✍️ <a href="https://dev.to/syedanas01/i-built-the-first-security-scanner-for-mcp-servers-heres-what-i-found-2np2">Dev.to</a> — "I built the first security scanner for MCP servers"</div>
+  <div class="press-item">📋 Listed in <a href="https://github.com/punkpeye/awesome-mcp-servers">awesome-mcp-servers</a> (87K stars)</div>
+  <div class="press-item">🔒 <a href="https://github.com/microsoft/playwright-mcp/issues/1626">microsoft/playwright-mcp #1626</a> — SSRF finding disclosed</div>
+  <div class="press-item">🔒 <a href="https://github.com/modelcontextprotocol/servers/issues/4234">modelcontextprotocol/servers #4234</a> — Security guidance filed</div>
+  <div class="press-item">📊 <a href="https://github.com/OWASP/www-project-top-10-for-large-language-model-applications/issues/836">OWASP LLM Top 10 #836</a> — MCP coverage requested</div>
+</div>
+
+<footer>
+  Built by <a href="https://github.com/SyedAnas01">Syed Anas Mohiuddin</a> · <a href="https://github.com/SyedAnas01/mcp-safeguard">GitHub</a> · <a href="https://pypi.org/project/mcp-safeguard/">PyPI</a> · MIT License
+</footer>
+
+</body>
+</html>
