@@ -355,11 +355,28 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 
 ---
 
-## Recognition
+## Recognition & Coverage
 
-- Listed in [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) — 86K stars
+### 📰 Press & Community
+- **[Hacker News](https://news.ycombinator.com/item?id=48242541)** — "MCP-safeguard: Security scanner for MCP servers" (2026-05-22)
+- **[Dev.to](https://dev.to/syedanas01/i-built-the-first-security-scanner-for-mcp-servers-heres-what-i-found-2np2)** — "I built the first security scanner for MCP servers" (2026-05-22)
+- Listed in [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) — 87K stars
 - Referenced in OWASP MCP Tool Poisoning guidance (2026)
-- Cited in arXiv preprint cs.CR: "mcp-safeguard: Automated Security Analysis for MCP Deployments"
+- arXiv preprint in preparation: "mcp-safeguard: Automated Security Analysis for MCP Deployments" (cs.AI/cs.CR)
+
+### 🔒 Security Disclosures Filed
+- **[microsoft/playwright-mcp #1626](https://github.com/microsoft/playwright-mcp/issues/1626)** — SSRF via unrestricted URL navigation (Medium, CVSS 5.3)
+- **[modelcontextprotocol/servers #4234](https://github.com/modelcontextprotocol/servers/issues/4234)** — Security considerations for MCP server deployments
+- CVE filings in progress (90-day responsible disclosure timeline)
+
+### 📋 Awesome Lists PRs Open
+- [awesome-python](https://github.com/vinta/awesome-python) (299K ⭐)
+- [awesome-llm-security](https://github.com/corca-ai/awesome-llm-security)
+- [awesome-security](https://github.com/sbilly/awesome-security)
+- [Prompt-Engineering-Guide](https://github.com/dair-ai/Prompt-Engineering-Guide) (74K ⭐)
+- [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) (87K ⭐)
+- [the-book-of-secret-knowledge](https://github.com/trimstray/the-book-of-secret-knowledge)
+- And 9 more awesome lists
 
 ---
 
