@@ -112,6 +112,7 @@ def _run_scan(config_path: str, min_severity: str = "INFO",
     from mcp_shield.scanner.credential_scanner import scan_for_credentials
     from mcp_shield.scanner.prompt_injection import scan_for_prompt_injection
     from mcp_shield.scanner.tool_analyzer import scan_for_tool_poisoning
+    from mcp_shield.scanner.ssrf_scanner import scan_for_ssrf
 
     _print_banner()
     print(f"Scanning: {_color(config_path, _BOLD)}")
@@ -164,6 +165,21 @@ def _run_scan(config_path: str, min_severity: str = "INFO",
                 "remediation": f.remediation,
                 "cvss": f.cvss_score,
                 "category": "tool-poisoning",
+            })
+
+    # --- SSRF Detection ---
+    if tools:
+        ssrf_findings = scan_for_ssrf(tools)
+        for f in ssrf_findings:
+            all_findings.append({
+                "rule_id": f.rule_id,
+                "severity": f.severity.value,
+                "title": f.title,
+                "location": f.location,
+                "evidence": getattr(f, "evidence", ""),
+                "remediation": f.remediation,
+                "cvss": f.cvss_score,
+                "category": "ssrf",
             })
 
     # Filter by min severity
