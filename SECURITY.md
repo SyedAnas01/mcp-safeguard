@@ -2,30 +2,39 @@
 
 ## Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| 0.1.x   | ✅ Yes    |
+| Version | Supported          |
+| ------- | ------------------ |
+| 0.2.x   | :white_check_mark: |
+| 0.1.x   | :x:                |
 
 ## Reporting a Vulnerability
 
-Please **do not** open a public GitHub issue for security vulnerabilities.
+If you discover a security vulnerability in mcp-safeguard itself, please report it via:
 
-Instead, email: cognivators@gmail.com
+1. **GitHub Security Advisories** (preferred): Go to Security → Advisories → New advisory
+2. **Email**: anasmohiuddinsyed@gmail.com
 
-Include:
+Please do **not** open a public GitHub issue for security vulnerabilities.
+
+### What to Include
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
-- Suggested fix (optional)
+- Suggested remediation (if any)
 
-We will respond within 48 hours and aim to release a patch within 7 days for critical issues.
+### Response Timeline
+- **Acknowledgment**: Within 48 hours
+- **Initial assessment**: Within 7 days  
+- **Fix or mitigation**: Within 90 days
 
-## Security Design
+## Responsible Disclosure
 
-mcp-safeguard itself follows these security practices:
-- All scan inputs are validated and sanitized before use
-- SSRF protection: only localhost is scannable by default
-- Token-bucket rate limiting prevents abuse
-- Authentication via constant-time HMAC comparison
-- Structured audit logging for all tool calls
-- No credentials are stored — only masked (first 4 + last 4 chars) in reports
+We follow coordinated vulnerability disclosure. We will:
+- Acknowledge your report promptly
+- Work with you to understand the issue
+- Patch and release fixes
+- Credit you in the changelog (unless you prefer anonymity)
+
+## CVE Assignments
+
+For significant vulnerabilities we discover in third-party MCP servers, we file CVEs through MITRE. See [CVE-TARGETS.md](../o1a/CVE-TARGETS.md) for our current audit queue.
