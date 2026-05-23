@@ -1,0 +1,67 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.syedanas01/mcp-safeguard",
+  "description": "Security scanner for MCP servers — automatically detect prompt injection, credential leaks, SSRF vulnerabilities, and tool poisoning with 55 CVSS-scored rules across 5 attack categories.",
+  "repository": {
+    "url": "https://github.com/SyedAnas01/mcp-safeguard",
+    "source": "github"
+  },
+  "version": "0.3.0",
+  "homepage": "https://github.com/SyedAnas01/mcp-safeguard",
+  "license": "MIT",
+  "author": {
+    "name": "Syed Anas Mohiuddin",
+    "email": "syed.anas@cognivators.com",
+    "url": "https://github.com/SyedAnas01"
+  },
+  "categories": ["security", "developer-tools", "testing"],
+  "tags": ["security", "mcp", "prompt-injection", "ssrf", "credential-scanning", "ai-security", "llm-security"],
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "mcp-safeguard",
+      "version": "0.3.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "installCommand": "pip install mcp-safeguard",
+      "runCommand": "mcp-safeguard"
+    }
+  ],
+  "tools": [
+    {
+      "name": "scan_config",
+      "description": "Scan an MCP server configuration file for security vulnerabilities. Detects prompt injection (PI-001–PI-019), credential leaks (CRED-001–025), SSRF risks (SS-001–003), and tool poisoning (TP-001–008). Returns CVSS-scored findings with remediation guidance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "config_path": {
+            "type": "string",
+            "description": "Path to the Claude Desktop or MCP config JSON file to scan"
+          },
+          "min_severity": {
+            "type": "string",
+            "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+            "default": "INFO",
+            "description": "Minimum severity level to report"
+          }
+        },
+        "required": ["config_path"]
+      }
+    },
+    {
+      "name": "scan_tools",
+      "description": "Scan raw MCP tool definitions for security vulnerabilities without a config file. Accepts a list of tool objects and returns findings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tools": {
+            "type": "array",
+            "description": "Array of MCP tool definition objects with name, description, and inputSchema"
+          }
+        },
+        "required": ["tools"]
+      }
+    }
+  ]
+}
