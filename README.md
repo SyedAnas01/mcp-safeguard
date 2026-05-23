@@ -10,7 +10,7 @@ Detect prompt injection · credential leaks · exposed endpoints · tool poisoni
 [![CI](https://github.com/SyedAnas01/mcp-safeguard/actions/workflows/ci.yml/badge.svg)](https://github.com/SyedAnas01/mcp-safeguard/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![MCP Compatible](https://img.shields.io/badge/MCP-compatible-green.svg)](https://modelcontextprotocol.io)
+[![Listed on mcpservers.org](https://img.shields.io/badge/listed%20on-mcpservers.org-blueviolet)](https://mcpservers.org/servers/syedanas01/mcp-safeguard)
 [![Stars](https://img.shields.io/github/stars/SyedAnas01/mcp-safeguard?style=social)](https://github.com/SyedAnas01/mcp-safeguard/stargazers)
 
 ```bash
