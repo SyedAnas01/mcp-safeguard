@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-safeguard"
-version = "0.3.0"
+version = "0.3.1"
 description = "Security scanner for MCP servers — detect prompt injection, credential leaks, exposed endpoints, and tool poisoning"
 readme = "README.md"
 license = { text = "MIT" }
