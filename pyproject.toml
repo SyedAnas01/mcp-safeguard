@@ -8,7 +8,8 @@ version = "0.3.0"
 description = "Security scanner for MCP servers — detect prompt injection, credential leaks, exposed endpoints, and tool poisoning"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "mcp-shield contributors" }]
+authors = [{ name = "Syed Anas Mohiuddin", email = "anasmohiuddinsyed@gmail.com" }]
+maintainers = [{ name = "Syed Anas Mohiuddin", email = "anasmohiuddinsyed@gmail.com" }]
 keywords = [
     "mcp",
     "security",
@@ -69,6 +70,9 @@ Changelog = "https://github.com/SyedAnas01/mcp-safeguard/blob/main/CHANGELOG.md"
 [project.scripts]
 mcp-safeguard = "mcp_shield.cli:main"
 mcp-shield = "mcp_shield.server:mcp.run"
+
+[tool.setuptools]
+license-files = []
 
 [tool.setuptools.packages.find]
 where = ["src"]
