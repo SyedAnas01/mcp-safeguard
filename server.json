@@ -3,16 +3,16 @@
   "name": "io.github.syedanas01/mcp-safeguard",
   "description": "Security scanner for MCP servers — automatically detect prompt injection, credential leaks, SSRF vulnerabilities, and tool poisoning with 55 CVSS-scored rules across 5 attack categories.",
   "repository": {
-    "url": "https://github.com/SyedAnas01/mcp-safeguard",
+    "url": "https://gitlab.com/anasmohiuddinsyed/mcp-safeguard",
     "source": "github"
   },
   "version": "0.3.0",
-  "homepage": "https://github.com/SyedAnas01/mcp-safeguard",
+  "homepage": "https://gitlab.com/anasmohiuddinsyed/mcp-safeguard",
   "license": "MIT",
   "author": {
     "name": "Syed Anas Mohiuddin",
     "email": "syed.anas@cognivators.com",
-    "url": "https://github.com/SyedAnas01"
+    "url": "https://gitlab.com/anasmohiuddinsyed"
   },
   "categories": ["security", "developer-tools", "testing"],
   "tags": ["security", "mcp", "prompt-injection", "ssrf", "credential-scanning", "ai-security", "llm-security"],

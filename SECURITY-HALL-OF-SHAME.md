@@ -347,10 +347,10 @@ The more real scan data the community contributes, the clearer the picture of MC
 ---
 
 **Links:**
-- GitHub: [github.com/SyedAnas01/mcp-safeguard](https://github.com/SyedAnas01/mcp-safeguard)
+- GitHub: [gitlab.com/anasmohiuddinsyed/mcp-safeguard](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard)
 - `pip install mcp-safeguard`
 - Issues / feature requests: open a GitHub issue
 
 ---
 
-*Pattern library maintained alongside mcp-safeguard. Patterns are drawn from the OWASP 2026 MCP security guidance and MCPTox research findings. mcp-safeguard is open source — [contribute patterns](https://github.com/SyedAnas01/mcp-safeguard/blob/main/CONTRIBUTING.md).*
+*Pattern library maintained alongside mcp-safeguard. Patterns are drawn from the OWASP 2026 MCP security guidance and MCPTox research findings. mcp-safeguard is open source — [contribute patterns](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard/blob/main/CONTRIBUTING.md).*
