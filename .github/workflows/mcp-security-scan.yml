@@ -13,7 +13,7 @@
 #   2. (Optional) Add GITHUB_TOKEN is already auto-provided
 #      for PR comment posting.
 #
-# More info: https://github.com/SyedAnas01/mcp-safeguard
+# More info: https://gitlab.com/anasmohiuddinsyed/mcp-safeguard
 # ============================================================
 
 name: MCP Security Scan
@@ -194,7 +194,7 @@ jobs:
               `> Full JSON report available as a workflow artifact (retained 30 days).`,
               ``,
               `---`,
-              `_Scanned by [mcp-safeguard](https://github.com/SyedAnas01/mcp-safeguard) — automated MCP security scanning_`,
+              `_Scanned by [mcp-safeguard](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard) — automated MCP security scanning_`,
             ].join('\n');
 
             // Find and update existing comment, or create a new one

@@ -8,7 +8,7 @@ Run the scanner against an intentionally vulnerable config to see what it finds:
 pip install mcp-safeguard
 
 # Clone the repo to get the demo config
-git clone https://github.com/SyedAnas01/mcp-safeguard
+git clone https://gitlab.com/anasmohiuddinsyed/mcp-safeguard
 cd mcp-safeguard
 
 # Scan the vulnerable demo

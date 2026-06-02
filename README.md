@@ -7,11 +7,10 @@
 Detect prompt injection · credential leaks · exposed endpoints · tool poisoning
 
 [![PyPI version](https://badge.fury.io/py/mcp-safeguard.svg)](https://pypi.org/project/mcp-safeguard/)
-[![CI](https://github.com/SyedAnas01/mcp-safeguard/actions/workflows/ci.yml/badge.svg)](https://github.com/SyedAnas01/mcp-safeguard/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Listed on mcpservers.org](https://img.shields.io/badge/listed%20on-mcpservers.org-blueviolet)](https://mcpservers.org/servers/syedanas01/mcp-safeguard)
-[![Stars](https://img.shields.io/github/stars/SyedAnas01/mcp-safeguard?style=social)](https://github.com/SyedAnas01/mcp-safeguard/stargazers)
+[![GitLab](https://img.shields.io/badge/GitLab-repo-fc6d26?logo=gitlab)](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard)
 
 ```bash
 pip install mcp-safeguard
@@ -26,14 +25,14 @@ mcp-safeguard scan your-config.json
 
 ```bash
 pip install mcp-safeguard
-git clone https://github.com/SyedAnas01/mcp-safeguard && cd mcp-safeguard
+git clone https://gitlab.com/anasmohiuddinsyed/mcp-safeguard && cd mcp-safeguard
 mcp-safeguard scan examples/demo-vulnerable-config.json
 ```
 
 ```
 ┌─────────────────────────────────────────────────┐
 │  mcp-safeguard  —  MCP Security Scanner         │
-│  github.com/SyedAnas01/mcp-safeguard            │
+│  gitlab.com/anasmohiuddinsyed/mcp-safeguard            │
 └─────────────────────────────────────────────────┘
 
 Scanning: examples/demo-vulnerable-config.json
@@ -364,7 +363,7 @@ OWASP officially added **MCP Tool Poisoning** to their 2026 threat guidance — 
 
 The vulnerability patterns mcp-safeguard detects are documented with illustrative examples in [SECURITY-HALL-OF-SHAME.md](SECURITY-HALL-OF-SHAME.md). Run mcp-safeguard on your own servers and contribute real scan results via GitHub Issues or Discussions.
 
-Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-safeguard/discussions) or submit a PR to SECURITY-HALL-OF-SHAME.md.
+Share your results — open a [Discussion](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard/discussions) or submit a PR to SECURITY-HALL-OF-SHAME.md.
 
 ---
 
@@ -405,7 +404,7 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 ## Contributing
 
 ```bash
-git clone https://github.com/SyedAnas01/mcp-safeguard
+git clone https://gitlab.com/anasmohiuddinsyed/mcp-safeguard
 cd mcp-safeguard
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
@@ -431,6 +430,6 @@ MIT — see [LICENSE](LICENSE).
 
 **If this helped you, please ⭐ the repo — it helps others find it.**
 
-[GitHub](https://github.com/SyedAnas01/mcp-safeguard) · [PyPI](https://pypi.org/project/mcp-safeguard/) · [Issues](https://github.com/SyedAnas01/mcp-safeguard/issues)
+[GitHub](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard) · [PyPI](https://pypi.org/project/mcp-safeguard/) · [Issues](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard/issues)
 
 </div>
