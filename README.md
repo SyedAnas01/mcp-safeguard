@@ -7,6 +7,7 @@
 Detect prompt injection · credential leaks · exposed endpoints · tool poisoning
 
 [![PyPI version](https://badge.fury.io/py/mcp-safeguard.svg)](https://pypi.org/project/mcp-safeguard/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20502474.svg)](https://doi.org/10.5281/zenodo.20502474)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Listed on mcpservers.org](https://img.shields.io/badge/listed%20on-mcpservers.org-blueviolet)](https://mcpservers.org/servers/syedanas01/mcp-safeguard)
