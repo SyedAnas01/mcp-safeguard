@@ -199,6 +199,48 @@ fastmcp run src/mcp_shield/server.py --transport sse --port 8000
 
 ---
 
+## CI/CD Integration
+
+Drop mcp-safeguard into your pipeline so MCP configs are scanned on every change. It exits non-zero when it finds issues at or above your chosen severity, so a vulnerable config fails the build.
+
+**pre-commit** (`.pre-commit-config.yaml`):
+
+```yaml
+repos:
+  - repo: https://gitlab.com/anasmohiuddinsyed/mcp-safeguard
+    rev: v0.3.0
+    hooks:
+      - id: mcp-safeguard
+```
+
+**GitHub Actions** (`.github/workflows/mcp-security.yml`):
+
+```yaml
+name: MCP Security Scan
+on: [push, pull_request]
+jobs:
+  mcp-safeguard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install mcp-safeguard
+      - run: mcp-safeguard scan mcp.json --fail-on HIGH --format json --output mcp-findings.json
+```
+
+**GitLab CI** (`.gitlab-ci.yml`):
+
+```yaml
+mcp-safeguard:
+  image: python:3.12
+  script:
+    - pip install mcp-safeguard
+    - mcp-safeguard scan mcp.json --fail-on HIGH
+```
+
+Point the scan at your own MCP config path (e.g. `claude_desktop_config.json`). Use `--fail-on CRITICAL` for a softer gate, or `--format json --output report.json` to archive results.
+
+---
+
 ## Tools Reference
 
 | Tool | Description |

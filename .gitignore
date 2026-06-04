@@ -62,3 +62,4 @@ htmlcov/
 secrets.json
 
 dist_new/
+.mcp-publisher-key
