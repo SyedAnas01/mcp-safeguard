@@ -1,3 +1,4 @@
+<!-- mcp-name: com.cognivators/mcp-safeguard -->
 <div align="center">
 
 # 🛡️ mcp-safeguard

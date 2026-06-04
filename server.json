@@ -6,7 +6,7 @@
     "url": "https://gitlab.com/anasmohiuddinsyed/mcp-safeguard",
     "source": "gitlab"
   },
-  "version": "0.3.0",
+  "version": "0.3.2",
   "homepage": "https://gitlab.com/anasmohiuddinsyed/mcp-safeguard",
   "license": "MIT",
   "author": {
@@ -14,13 +14,25 @@
     "email": "syed.anas@cognivators.com",
     "url": "https://gitlab.com/anasmohiuddinsyed"
   },
-  "categories": ["security", "developer-tools", "testing"],
-  "tags": ["security", "mcp", "prompt-injection", "ssrf", "credential-scanning", "ai-security", "llm-security"],
+  "categories": [
+    "security",
+    "developer-tools",
+    "testing"
+  ],
+  "tags": [
+    "security",
+    "mcp",
+    "prompt-injection",
+    "ssrf",
+    "credential-scanning",
+    "ai-security",
+    "llm-security"
+  ],
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcp-safeguard",
-      "version": "0.3.0",
+      "version": "0.3.2",
       "transport": {
         "type": "stdio"
       },
@@ -31,7 +43,7 @@
   "tools": [
     {
       "name": "scan_config",
-      "description": "Scan an MCP server configuration file for security vulnerabilities. Detects prompt injection (PI-001–PI-019), credential leaks (CRED-001–025), SSRF risks (SS-001–003), and tool poisoning (TP-001–008). Returns CVSS-scored findings with remediation guidance.",
+      "description": "Scan an MCP server configuration file for security vulnerabilities. Detects prompt injection (PI-001\u2013PI-019), credential leaks (CRED-001\u2013025), SSRF risks (SS-001\u2013003), and tool poisoning (TP-001\u2013008). Returns CVSS-scored findings with remediation guidance.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -41,12 +53,20 @@
           },
           "min_severity": {
             "type": "string",
-            "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+            "enum": [
+              "CRITICAL",
+              "HIGH",
+              "MEDIUM",
+              "LOW",
+              "INFO"
+            ],
             "default": "INFO",
             "description": "Minimum severity level to report"
           }
         },
-        "required": ["config_path"]
+        "required": [
+          "config_path"
+        ]
       }
     },
     {
@@ -60,7 +80,9 @@
             "description": "Array of MCP tool definition objects with name, description, and inputSchema"
           }
         },
-        "required": ["tools"]
+        "required": [
+          "tools"
+        ]
       }
     }
   ]
