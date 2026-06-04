@@ -1,0 +1,16 @@
+# pre-commit hook definitions for mcp-safeguard
+# Users add this to their .pre-commit-config.yaml to scan MCP configs on every commit:
+#
+#   repos:
+#     - repo: https://gitlab.com/anasmohiuddinsyed/mcp-safeguard
+#       rev: v0.3.0
+#       hooks:
+#         - id: mcp-safeguard
+#
+- id: mcp-safeguard
+  name: mcp-safeguard (MCP security scan)
+  description: Scan MCP server configuration files for prompt injection, credential leaks, SSRF, and tool poisoning
+  entry: mcp-safeguard scan
+  language: python
+  files: '(^|/)(mcp\.json|\.mcp\.json|claude_desktop_config\.json|.*[._-]mcp[._-]?config\.json)$'
+  args: ['--fail-on', 'HIGH']
