@@ -74,7 +74,7 @@ Scanning: examples/demo-vulnerable-config.json
 
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io) connects AI agents — Claude, Cursor, Windsurf, GPT — to real-world tools: your filesystem, databases, shell, APIs. It's growing fast. The security tooling hasn't kept up.
 
-**mcp-safeguard is the first automated security scanner for MCP.** It audits tool definitions and server configs for the attack surfaces OWASP classified in 2026.
+**mcp-safeguard is an open-source automated security scanner for MCP.** It audits tool definitions and server configs for the attack surfaces OWASP classified in 2026.
 
 ---
 
@@ -360,7 +360,7 @@ External research confirms the threat is real: [MCPTox (2025)](https://arxiv.org
 
 OWASP officially added **MCP Tool Poisoning** to their 2026 threat guidance — the same vulnerability category mcp-safeguard's `TP-*` rules detect.
 
-**The gap**: The MCP ecosystem grew from zero to 10,000+ servers in 18 months with no automated security tooling. mcp-safeguard is the first scanner built specifically for this attack surface.
+**The gap**: The MCP ecosystem grew from zero to 10,000+ servers in 18 months while security tooling lagged behind. mcp-safeguard is an open-source scanner built specifically for this attack surface.
 
 The vulnerability patterns mcp-safeguard detects are documented with illustrative examples in [SECURITY-HALL-OF-SHAME.md](SECURITY-HALL-OF-SHAME.md). Run mcp-safeguard on your own servers and contribute real scan results via GitHub Issues or Discussions.
 
@@ -368,28 +368,14 @@ Share your results — open a [Discussion](https://gitlab.com/anasmohiuddinsyed/
 
 ---
 
-## Recognition & Coverage
+## Project Resources & Standards Work
 
-### 📰 Press & Community
-- **[Hacker News](https://news.ycombinator.com/item?id=48242541)** — "MCP-safeguard: Security scanner for MCP servers" (2026-05-22)
-- **[Dev.to](https://dev.to/syedanas01/i-built-the-first-security-scanner-for-mcp-servers-heres-what-i-found-2np2)** — "I built the first security scanner for MCP servers" (2026-05-22)
-- Listed in [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) — 87K stars
-- Referenced in OWASP MCP Tool Poisoning guidance (2026)
-- arXiv preprint in preparation: "mcp-safeguard: Automated Security Analysis for MCP Deployments" (cs.AI/cs.CR)
+- **Source & releases**: [gitlab.com/anasmohiuddinsyed/mcp-safeguard](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard) · install with `pip install mcp-safeguard`
+- **IETF Internet-Draft**: [draft-mohiuddin-mcp-security-considerations-00](https://datatracker.ietf.org/doc/draft-mohiuddin-mcp-security-considerations/) — security considerations for the Model Context Protocol, formalizing the vulnerability classes this tool detects
+- **Author write-up**: [Dev.to — building a security scanner for MCP servers](https://dev.to/syedanas01/i-built-the-first-security-scanner-for-mcp-servers-heres-what-i-found-2np2) · [Show HN discussion](https://news.ycombinator.com/item?id=48242541)
+- **OWASP MCP Top 10**: detection-methodology contribution in progress
 
-### 🔒 Security Disclosures Filed
-- **[microsoft/playwright-mcp #1626](https://github.com/microsoft/playwright-mcp/issues/1626)** — SSRF via unrestricted URL navigation (Medium, CVSS 5.3)
-- **[modelcontextprotocol/servers #4234](https://github.com/modelcontextprotocol/servers/issues/4234)** — Security considerations for MCP server deployments
-- CVE filings in progress (90-day responsible disclosure timeline)
-
-### 📋 Awesome Lists PRs Open
-- [awesome-python](https://github.com/vinta/awesome-python) (299K ⭐)
-- [awesome-llm-security](https://github.com/corca-ai/awesome-llm-security)
-- [awesome-security](https://github.com/sbilly/awesome-security)
-- [Prompt-Engineering-Guide](https://github.com/dair-ai/Prompt-Engineering-Guide) (74K ⭐)
-- [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) (87K ⭐)
-- [the-book-of-secret-knowledge](https://github.com/trimstray/the-book-of-secret-knowledge)
-- And 9 more awesome lists
+Using mcp-safeguard in your pipeline, or found a real issue with it? We welcome scan results and contributions — open a [Discussion](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard) or PR.
 
 ---
 
