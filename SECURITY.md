@@ -4,7 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
+| 0.3.x   | :white_check_mark: |
+| 0.2.x   | :x:                |
 | 0.1.x   | :x:                |
 
 ## Reporting a Vulnerability
@@ -37,4 +38,4 @@ We follow coordinated vulnerability disclosure. We will:
 
 ## CVE Assignments
 
-For significant vulnerabilities we discover in third-party MCP servers, we file CVEs through MITRE. See [CVE-TARGETS.md](../o1a/CVE-TARGETS.md) for our current audit queue.
+For significant vulnerabilities we discover in third-party MCP servers, we file CVEs through MITRE following 90-day coordinated disclosure. Past disclosures are documented in the changelog.

@@ -74,7 +74,7 @@ Scanning: examples/demo-vulnerable-config.json
 
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io) connects AI agents — Claude, Cursor, Windsurf, GPT — to real-world tools: your filesystem, databases, shell, APIs. It's growing fast. The security tooling hasn't kept up.
 
-**mcp-safeguard is the first automated security scanner for MCP.** It audits tool definitions and server configs for the attack surfaces OWASP classified in 2026.
+**mcp-safeguard is an automated security scanner purpose-built for MCP.** It audits tool definitions and server configs for the attack surfaces OWASP classified in 2026.
 
 ---
 
@@ -103,7 +103,7 @@ Four attack surfaces mcp-safeguard covers:
 | **Tool Poisoning** | TP-001–TP-008 | Tools with side-effect exfiltration, external URL calls, safety override instructions |
 | **SSRF Detection** | SS-001–SS-003 | URL parameters without blocklist, blind URL fetch, redirect-following without revalidation |
 
-**v0.3.0: SSRF rules now catch `mcp-server-fetch` and `playwright-mcp` (confirmed open issues #4116, #4143, #4205):**
+**v0.3.0: SSRF rules detect vulnerable URL parameter patterns across MCP fetch/scrape tools:**
 
 ```
 [HIGH]  SS-001  URL Parameter Without SSRF Protection
@@ -272,10 +272,11 @@ Output:
 
 | Category | Rules | Patterns |
 |----------|-------|---------|
-| Prompt Injection | 15 rules | Instruction overrides, jailbreak, exfiltration, identity hijack, steganography |
-| Credential Leaks | 17 patterns | AWS, Anthropic, OpenAI, GitHub, Stripe, JWT, DB URLs, generic passwords |
+| Prompt Injection | 19 rules (PI-001–019) | Instruction overrides, jailbreak, exfiltration, identity hijack, steganography |
+| Credential Leaks | 25 patterns (CRED-001–025) | AWS, Anthropic, OpenAI, GitHub, Stripe, JWT, DB URLs, generic passwords |
 | Endpoint Exposure | 28 paths + 12 ports | Admin panels, debug routes, metadata services, dev ports |
-| Tool Poisoning | 8 patterns | Side-effect exfil, external calls, safety overrides, blast radius scoring |
+| Tool Poisoning | 8 patterns (TP-001–008) | Side-effect exfil, external calls, safety overrides, blast radius scoring |
+| SSRF Detection | 3 rules (SS-001–003) | URL params without blocklist, blind URL fetch, redirect-following without revalidation |
 
 ---
 
@@ -360,7 +361,7 @@ External research confirms the threat is real: [MCPTox (2025)](https://arxiv.org
 
 OWASP officially added **MCP Tool Poisoning** to their 2026 threat guidance — the same vulnerability category mcp-safeguard's `TP-*` rules detect.
 
-**The gap**: The MCP ecosystem grew from zero to 10,000+ servers in 18 months with no automated security tooling. mcp-safeguard is the first scanner built specifically for this attack surface.
+**The gap**: The MCP ecosystem grew from zero to 10,000+ servers in 18 months with security tooling lagging far behind. mcp-safeguard addresses this with automated scanning built specifically for MCP's attack surface — tool definitions, server configs, and SSRF exposure via prompt injection.
 
 The vulnerability patterns mcp-safeguard detects are documented with illustrative examples in [SECURITY-HALL-OF-SHAME.md](SECURITY-HALL-OF-SHAME.md). Run mcp-safeguard on your own servers and contribute real scan results via GitHub Issues or Discussions.
 
@@ -378,8 +379,8 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 - arXiv preprint in preparation: "mcp-safeguard: Automated Security Analysis for MCP Deployments" (cs.AI/cs.CR)
 
 ### 🔒 Security Disclosures Filed
-- **[microsoft/playwright-mcp #1626](https://github.com/microsoft/playwright-mcp/issues/1626)** — SSRF via unrestricted URL navigation (Medium, CVSS 5.3)
 - **[modelcontextprotocol/servers #4234](https://github.com/modelcontextprotocol/servers/issues/4234)** — Security considerations for MCP server deployments
+- **googleapis/mcp-toolbox** — SSRF via redirect chain (CWE-918, fix in [PR #3448](https://github.com/googleapis/mcp-toolbox/pull/3448), reported by Syed Anas Mohiuddin)
 - CVE filings in progress (90-day responsible disclosure timeline)
 
 ### 📋 Awesome Lists PRs Open
@@ -395,10 +396,11 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 
 ## Roadmap
 
-- [ ] **v0.2** — Scan over MCP stdio transport directly; GitHub Actions plugin
-- [ ] **v0.3** — VS Code extension for real-time tool description linting; MCP registry bulk scanning
-- [ ] **v0.4** — AI-assisted remediation (Claude generates fixes); SBOM for tool supply chain
-- [ ] **v1.0** — SOC2/compliance report templates
+- [x] **v0.2** — Tool poisoning detection; CVSS scoring; JSON + Markdown output; batch scanning
+- [x] **v0.3** — SSRF detection module (SS-001–003); MCP server dog-fooding
+- [ ] **v0.4** — Scan over MCP stdio transport directly; VS Code extension; GitHub Actions plugin
+- [ ] **v0.5** — AI-assisted remediation (Claude generates fixes); SBOM for tool supply chain
+- [ ] **v1.0** — SOC2/compliance report templates; MCP registry bulk scanning
 
 ---
 

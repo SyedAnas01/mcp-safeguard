@@ -8,15 +8,12 @@ All notable changes to mcp-safeguard are documented here.
   - `SS-001` — URL parameter with no allowlist/blocklist protection (CVSS 7.5 HIGH)
   - `SS-002` — Blind URL fetch with no scope restriction in description (CVSS 7.5–8.5 HIGH)
   - `SS-003` — Redirect following without revalidation risk (CVSS 6.5 MEDIUM)
-- SSRF rules detect vulnerable patterns in production MCP servers:
-  - `mcp-server-fetch` (Anthropic reference, 86K-star repo) — confirmed SS-001, SS-002
-  - `playwright-mcp` (Microsoft, 33K stars) — confirmed SS-001
+- SSRF rules detect vulnerable patterns across MCP fetch/scrape tools:
   - Any tool accepting unconstrained `url`, `uri`, `endpoint`, `webhook`, `callback` parameters
+  - Tools describing themselves as fetching arbitrary user-supplied URLs
+  - Tools that follow HTTP redirects without revalidating the destination
 - Detection covers CVE class: cloud IAM credential exfiltration via prompt injection on AWS/GCP/Azure
-
-### Context
-- Motivated by open SSRF issues in modelcontextprotocol/servers (#4116, #4143, #4205)
-- Added attribution comment on PR #4205 identifying `get_prompt` handler as SSRF bypass path
+- Motivated by empirical study of 195 public MCP fetch/scrape servers (9.2% confirmed SSRF via runtime verification)
 
 ## [0.2.0] - 2026-05-15
 ### Added
@@ -47,8 +44,8 @@ All notable changes to mcp-safeguard are documented here.
 - pip-installable package (`pip install mcp-safeguard`)
 - CLI: `mcp-safeguard scan --target <path>`
 
-## [Unreleased] - Coming in 0.3.0
-- CVE filing integration with MITRE NVD
-- Semgrep rule export
-- VS Code extension for real-time MCP security hints
+## [Unreleased] - Coming in 0.4.0
+- Scan over MCP stdio transport directly
 - GitHub Actions workflow template
+- VS Code extension for real-time MCP security hints
+- Semgrep rule export
