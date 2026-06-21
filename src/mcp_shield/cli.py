@@ -111,8 +111,8 @@ def _run_scan(config_path: str, min_severity: str = "INFO",
     """Run all scanners against a config file. Returns exit code."""
     from mcp_shield.scanner.credential_scanner import scan_for_credentials
     from mcp_shield.scanner.prompt_injection import scan_for_prompt_injection
-    from mcp_shield.scanner.tool_analyzer import scan_for_tool_poisoning
     from mcp_shield.scanner.ssrf_scanner import scan_for_ssrf
+    from mcp_shield.scanner.tool_analyzer import scan_for_tool_poisoning
 
     _print_banner()
     print(f"Scanning: {_color(config_path, _BOLD)}")

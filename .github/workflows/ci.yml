@@ -30,8 +30,6 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    # Advisory only — style/type findings should not block the build.
-    continue-on-error: true
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-python@v5
@@ -41,8 +39,8 @@ jobs:
       run: pip install ruff mypy
     - name: Ruff lint
       run: ruff check src/
-    - name: Type check
-      run: mypy src/ --ignore-missing-imports
+    - name: Type check (advisory)
+      run: mypy src/ --ignore-missing-imports || true
 
   security-scan:
     runs-on: ubuntu-latest
