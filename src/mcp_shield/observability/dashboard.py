@@ -94,7 +94,7 @@ def main() -> None:
 
     st.bar_chart(severity_counts)
 
-    st.caption(f"mcp-shield v0.1.0 | Reports from: {report_dir}")
+    st.caption(f"mcp-safeguard v0.3.0 | Reports from: {report_dir}")
 
 
 if __name__ == "__main__":

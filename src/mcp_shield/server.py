@@ -703,7 +703,7 @@ async def get_rules_resource() -> str:
         ],
     }
     total = sum(len(v) for v in rules.values())
-    rules["_meta"] = {"total_rules": total, "version": "0.1.0"}
+    rules["_meta"] = {"total_rules": total, "version": "0.3.0"}
     return json.dumps(rules, indent=2)
 
 

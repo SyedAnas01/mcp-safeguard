@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>mcp-safeguard — MCP Security Scanner</title>
-<meta name="description" content="The first automated security scanner for Model Context Protocol (MCP) servers. 52 detection rules across prompt injection, credential exposure, endpoint exposure, and tool poisoning.">
+<meta name="description" content="An automated security scanner for Model Context Protocol (MCP) servers. 52 detection rules across prompt injection, credential exposure, tool poisoning, and SSRF, plus endpoint and port probes.">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; line-height: 1.6; }
@@ -43,7 +43,7 @@ footer a { color: #58a6ff; text-decoration: none; }
 
 <div class="hero">
   <h1>🛡️ <span>mcp-safeguard</span></h1>
-  <p>The first automated security scanner for Model Context Protocol (MCP) servers. Detect vulnerabilities before deployment.</p>
+  <p>An automated security scanner for Model Context Protocol (MCP) servers. Detect vulnerabilities before deployment.</p>
   <div class="badge-row">
     <img src="https://badge.fury.io/py/mcp-safeguard.svg" alt="PyPI version">
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License">
@@ -79,9 +79,9 @@ footer a { color: #58a6ff; text-decoration: none; }
   <h2>Detection Coverage</h2>
   <div class="cat-grid">
     <div class="cat-card">
-      <div class="cat-badge">19 rules</div>
+      <div class="cat-badge">15 rules</div>
       <h3>🔴 Prompt Injection</h3>
-      <p>PI-001–PI-019: Detects instructions in tool outputs that override AI behavior, role assignment attacks, and context manipulation.</p>
+      <p>PI-001–PI-015: Detects instructions in tool outputs that override AI behavior, role assignment attacks, and context manipulation.</p>
     </div>
     <div class="cat-card">
       <div class="cat-badge">25 patterns</div>
@@ -91,7 +91,7 @@ footer a { color: #58a6ff; text-decoration: none; }
     <div class="cat-card">
       <div class="cat-badge">40 probes</div>
       <h3>🟡 Endpoint Exposure</h3>
-      <p>28 probes + 12 port checks for SSRF vulnerabilities via unrestricted URL navigation in browser and network tools.</p>
+      <p>28 sensitive-path probes + 12 dangerous-port checks for exposed admin, debug, and metadata endpoints.</p>
     </div>
     <div class="cat-card">
       <div class="cat-badge">8 rules</div>
@@ -104,9 +104,8 @@ footer a { color: #58a6ff; text-decoration: none; }
 <div class="press">
   <h2>📰 Coverage & Recognition</h2>
   <div class="press-item">📰 <a href="https://news.ycombinator.com/item?id=48242541">Hacker News</a> — "MCP-safeguard: Automated security scanner for MCP servers"</div>
-  <div class="press-item">✍️ <a href="https://dev.to/syedanas01/i-built-the-first-security-scanner-for-mcp-servers-heres-what-i-found-2np2">Dev.to</a> — "I built the first security scanner for MCP servers"</div>
-  <div class="press-item">📋 Listed in <a href="https://github.com/punkpeye/awesome-mcp-servers">awesome-mcp-servers</a> (87K stars)</div>
-  <div class="press-item">🔒 <a href="https://github.com/microsoft/playwright-mcp/issues/1626">microsoft/playwright-mcp #1626</a> — SSRF finding disclosed</div>
+  <div class="press-item">✍️ <a href="https://dev.to/syedanas01/i-built-the-first-security-scanner-for-mcp-servers-heres-what-i-found-2np2">Dev.to</a> — author writeup on building an MCP security scanner</div>
+  <div class="press-item">🔒 <a href="https://github.com/googleapis/mcp-toolbox/pull/3448">googleapis/mcp-toolbox #3448</a> — SSRF fix (CWE-918), credited to Syed Anas Mohiuddin</div>
   <div class="press-item">🔒 <a href="https://github.com/modelcontextprotocol/servers/issues/4234">modelcontextprotocol/servers #4234</a> — Security guidance filed</div>
   <div class="press-item">📊 <a href="https://github.com/OWASP/www-project-top-10-for-large-language-model-applications/issues/836">OWASP LLM Top 10 #836</a> — MCP coverage requested</div>
 </div>

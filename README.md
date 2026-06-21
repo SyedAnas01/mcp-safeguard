@@ -97,11 +97,11 @@ Four attack surfaces mcp-safeguard covers:
 
 | Risk | Rules | What it detects |
 |------|-------|----------------|
-| **Prompt Injection** | PI-001–PI-019 | Instruction overrides, jailbreak phrases, exfiltration commands, identity hijacking, zero-width steganography |
+| **Prompt Injection** | PI-001–PI-015 | Instruction overrides, jailbreak phrases, exfiltration commands, identity hijacking, zero-width steganography |
 | **Credential Leaks** | CRED-001–025 | AWS keys, Anthropic/OpenAI tokens, GitHub PATs, Stripe keys, JWTs, database URLs, hardcoded passwords |
 | **Endpoint Exposure** | EP-001–EP-013 | `/admin`, `/.env`, `/debug`, `/actuator`, AWS metadata `169.254.169.254`, dangerous open ports |
 | **Tool Poisoning** | TP-001–TP-008 | Tools with side-effect exfiltration, external URL calls, safety override instructions |
-| **SSRF Detection** | SS-001–SS-003 | URL parameters without blocklist, blind URL fetch, redirect-following without revalidation |
+| **SSRF Detection** | SS-001–SS-004 | URL parameters without blocklist, blind URL fetch, redirect-following without revalidation, non-HTTP schemes |
 
 **v0.3.0: SSRF rules detect vulnerable URL parameter patterns across MCP fetch/scrape tools:**
 
@@ -270,13 +270,15 @@ Output:
 
 ## Detection Coverage
 
+**52 core detection rules** across four categories — prompt injection (15) + credentials (25) + tool poisoning (8) + SSRF (4) — plus 28 endpoint path probes and 12 dangerous-port checks.
+
 | Category | Rules | Patterns |
 |----------|-------|---------|
-| Prompt Injection | 19 rules (PI-001–019) | Instruction overrides, jailbreak, exfiltration, identity hijack, steganography |
+| Prompt Injection | 15 rules (PI-001–015) | Instruction overrides, jailbreak, exfiltration, identity hijack, steganography |
 | Credential Leaks | 25 patterns (CRED-001–025) | AWS, Anthropic, OpenAI, GitHub, Stripe, JWT, DB URLs, generic passwords |
 | Endpoint Exposure | 28 paths + 12 ports | Admin panels, debug routes, metadata services, dev ports |
 | Tool Poisoning | 8 patterns (TP-001–008) | Side-effect exfil, external calls, safety overrides, blast radius scoring |
-| SSRF Detection | 3 rules (SS-001–003) | URL params without blocklist, blind URL fetch, redirect-following without revalidation |
+| SSRF Detection | 4 rules (SS-001–004) | URL params without blocklist, blind URL fetch, redirect-following without revalidation, non-HTTP schemes |
 
 ---
 
@@ -373,9 +375,8 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 
 ### 📰 Press & Community
 - **[Hacker News](https://news.ycombinator.com/item?id=48242541)** — "MCP-safeguard: Security scanner for MCP servers" (2026-05-22)
-- **[Dev.to](https://dev.to/syedanas01/i-built-the-first-security-scanner-for-mcp-servers-heres-what-i-found-2np2)** — "I built the first security scanner for MCP servers" (2026-05-22)
-- Listed in [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) — 87K stars
-- Referenced in OWASP MCP Tool Poisoning guidance (2026)
+- **[Dev.to](https://dev.to/syedanas01/i-built-the-first-security-scanner-for-mcp-servers-heres-what-i-found-2np2)** — author writeup on building an MCP security scanner (2026-05-22)
+- Open PR to OWASP MCP Top 10 adding an SSRF prevention/detection control ([PR #42](https://github.com/OWASP/www-project-mcp-top-10/pull/42), under review)
 - arXiv preprint in preparation: "mcp-safeguard: Automated Security Analysis for MCP Deployments" (cs.AI/cs.CR)
 
 ### 🔒 Security Disclosures Filed
@@ -388,7 +389,6 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 - [awesome-llm-security](https://github.com/corca-ai/awesome-llm-security)
 - [awesome-security](https://github.com/sbilly/awesome-security)
 - [Prompt-Engineering-Guide](https://github.com/dair-ai/Prompt-Engineering-Guide) (74K ⭐)
-- [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) (87K ⭐)
 - [the-book-of-secret-knowledge](https://github.com/trimstray/the-book-of-secret-knowledge)
 - And 9 more awesome lists
 
@@ -397,7 +397,7 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 ## Roadmap
 
 - [x] **v0.2** — Tool poisoning detection; CVSS scoring; JSON + Markdown output; batch scanning
-- [x] **v0.3** — SSRF detection module (SS-001–003); MCP server dog-fooding
+- [x] **v0.3** — SSRF detection module (SS-001–004); MCP server dog-fooding
 - [ ] **v0.4** — Scan over MCP stdio transport directly; VS Code extension; GitHub Actions plugin
 - [ ] **v0.5** — AI-assisted remediation (Claude generates fixes); SBOM for tool supply chain
 - [ ] **v1.0** — SOC2/compliance report templates; MCP registry bulk scanning
