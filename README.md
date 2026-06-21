@@ -375,7 +375,6 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 
 ### 📰 Press & Community
 - **[Hacker News](https://news.ycombinator.com/item?id=48242541)** — "MCP-safeguard: Security scanner for MCP servers" (2026-05-22)
-- **[Dev.to](https://dev.to/syedanas01/i-built-the-first-security-scanner-for-mcp-servers-heres-what-i-found-2np2)** — author writeup on building an MCP security scanner (2026-05-22)
 - Open PR to OWASP MCP Top 10 adding an SSRF prevention/detection control ([PR #42](https://github.com/OWASP/www-project-mcp-top-10/pull/42), under review)
 - arXiv preprint in preparation: "mcp-safeguard: Automated Security Analysis for MCP Deployments" (cs.AI/cs.CR)
 
