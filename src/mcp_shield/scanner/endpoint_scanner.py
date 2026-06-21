@@ -191,7 +191,7 @@ async def scan_endpoints(
         timeout=timeout,
         verify=False,
         follow_redirects=True,
-        headers={"User-Agent": "mcp-shield/0.1.0 security-scanner"},
+        headers={"User-Agent": "mcp-safeguard/0.3.0 security-scanner"},
     ) as client:
         for path, severity, rule_id, title, cvss_score in _SENSITIVE_PATHS:
             try:

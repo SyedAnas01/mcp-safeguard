@@ -2,7 +2,7 @@
 
 This document maps mcp-safeguard's detection rules to OWASP's 2026 MCP security guidance.
 
-OWASP classified **MCP Tool Poisoning** as an official 2026 attack category. This table shows how mcp-safeguard's 52 detection rules cover OWASP's identified threat categories.
+OWASP classified **MCP Tool Poisoning** as an official 2026 attack category. This table shows how mcp-safeguard's 52 core detection rules — prompt injection (15), credentials (25), tool poisoning (8), and SSRF (4) — plus 28 endpoint path probes and 12 dangerous-port checks cover OWASP's identified threat categories.
 
 ---
 
@@ -11,11 +11,11 @@ OWASP classified **MCP Tool Poisoning** as an official 2026 attack category. Thi
 | OWASP MCP Category | OWASP Description | mcp-safeguard Rules | Coverage |
 |-------------------|-------------------|---------------------|----------|
 | **MCP Tool Poisoning** | Tool descriptions contain embedded instructions that manipulate AI behavior | PI-001 to PI-015 (15 rules) | ✅ Full |
-| **Credential Exposure** | Sensitive credentials in server configs, tool definitions, or responses | CRED-001 to CRED-017 (17 rules) | ✅ Full |
-| **Dangerous Endpoint Exposure** | Unprotected admin, debug, or metadata endpoints | EP-001 to EP-028, PORT-001 to PORT-012 (40 rules) | ✅ Full |
+| **Credential Exposure** | Sensitive credentials in server configs, tool definitions, or responses | CRED-001 to CRED-025 (25 rules) | ✅ Full |
+| **Dangerous Endpoint Exposure** | Unprotected admin, debug, or metadata endpoints | 28 path probes + PORT-001 to PORT-012 (40 checks) | ✅ Full |
 | **Privilege Escalation via Tool Scope** | Tools requesting permissions beyond stated functionality | TP-001 to TP-008 (8 rules) | ✅ Full |
-| **SSRF via MCP Server** | Server-side request forgery through MCP tool invocation | SSRF guard built-in | ✅ Partial |
-| **Supply Chain via Third-Party Tools** | Malicious tools injected via package registries | Detection roadmap (v0.3) | 🔄 Planned |
+| **SSRF via MCP Server** | Server-side request forgery through MCP tool invocation | SS-001 to SS-004 (4 rules) | ✅ Full |
+| **Supply Chain via Third-Party Tools** | Malicious tools injected via package registries | Detection roadmap | 🔄 Planned |
 
 ---
 
@@ -42,7 +42,7 @@ OWASP classified **MCP Tool Poisoning** as an official 2026 attack category. Thi
 | PI-014 | Conditional trigger | 7.8 | "If the user mentions 'finance', then..." |
 | PI-015 | Schema injection | 7.4 | Malicious JSON in parameter defaults |
 
-### Category II — Credential Detection (CRED-001 to CRED-017)
+### Category II — Credential Detection (CRED-001 to CRED-025)
 *Covers: OWASP Credential Exposure*
 
 | Rule ID | Pattern | CVSS |
@@ -64,8 +64,16 @@ OWASP classified **MCP Tool Poisoning** as an official 2026 attack category. Thi
 | CRED-015 | Private key header (-----BEGIN...) | 9.5 |
 | CRED-016 | HuggingFace token (hf_...) | 7.8 |
 | CRED-017 | Generic high-entropy string (40+ chars) | 5.5 |
+| CRED-018 | Stripe credential in environment | 8.5 |
+| CRED-019 | OpenAI credential in environment | 8.5 |
+| CRED-020 | Anthropic credential in environment | 8.5 |
+| CRED-021 | Twilio credential in environment | 7.5 |
+| CRED-022 | SendGrid credential in environment | 7.5 |
+| CRED-023 | Slack credential in environment | 7.5 |
+| CRED-024 | GitHub credential in environment | 8.0 |
+| CRED-025 | AWS credential in environment | 9.5 |
 
-### Category III — Endpoint Exposure (EP-001 to EP-028 + PORT-001 to PORT-012)
+### Category III — Endpoint Exposure (28 path probes + PORT-001 to PORT-012)
 *Covers: OWASP Dangerous Endpoint Exposure*
 
 **Sensitive Path Probes** (28): `/admin`, `/management`, `/.env`, `/.git/config`, `/debug`, `/_debug`, `/actuator/env`, `/actuator/heap`, `/swagger-ui.html`, `/api-docs`, `/graphql` (introspection), `/__pycache__`, `/config.json`, `/secrets.json`, `/credentials`, `/backup`, `/phpinfo.php`, `/server-status`, `/server-info`, `/health` (verbose), `/metrics` (unauthenticated), `/trace`, `/mappings`, `/beans`, `/loggers`, `/heapdump`, `/threaddump`, `/jolokia`
@@ -85,6 +93,16 @@ OWASP classified **MCP Tool Poisoning** as an official 2026 attack category. Thi
 | TP-006 | User deception in description | 6.9 |
 | TP-007 | Covert channel establishment | 8.1 |
 | TP-008 | Blast radius — overly broad tool scope | 5.8 |
+
+### Category V — SSRF Detection (SS-001 to SS-004)
+*Covers: OWASP SSRF via MCP Server*
+
+| Rule ID | Pattern | CVSS |
+|---------|---------|------|
+| SS-001 | URL parameter with no allowlist/blocklist protection | 7.5 |
+| SS-002 | Blind URL fetch — description indicates fetching arbitrary URLs | 7.5–8.5 |
+| SS-003 | Redirect following without revalidation | 6.5 |
+| SS-004 | Non-HTTP scheme accepted (file://, gopher://, dict://) | 6.5 |
 
 ---
 
@@ -110,5 +128,5 @@ For CI/CD integration:
 
 - [OWASP AI Security Project](https://owasp.org/www-project-ai-security-and-privacy-guide/)
 - [OWASP MCP Tool Poisoning (2026)](https://owasp.org)
-- [mcp-safeguard arXiv Paper](https://arxiv.org) — cs.CR
+- mcp-safeguard arXiv preprint — *in preparation* (cs.CR)
 - [Model Context Protocol Specification](https://modelcontextprotocol.io)

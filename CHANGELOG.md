@@ -4,10 +4,11 @@ All notable changes to mcp-safeguard are documented here.
 
 ## [0.3.0] - 2026-05-22
 ### Added
-- **SSRF detection module** (`ssrf_scanner.py`): 3 new rules for Server-Side Request Forgery
+- **SSRF detection module** (`ssrf_scanner.py`): 4 new rules for Server-Side Request Forgery
   - `SS-001` — URL parameter with no allowlist/blocklist protection (CVSS 7.5 HIGH)
   - `SS-002` — Blind URL fetch with no scope restriction in description (CVSS 7.5–8.5 HIGH)
   - `SS-003` — Redirect following without revalidation risk (CVSS 6.5 MEDIUM)
+  - `SS-004` — Non-HTTP scheme accepted (`file://`, `gopher://`, `dict://`) (CVSS 6.5 MEDIUM)
 - SSRF rules detect vulnerable patterns across MCP fetch/scrape tools:
   - Any tool accepting unconstrained `url`, `uri`, `endpoint`, `webhook`, `callback` parameters
   - Tools describing themselves as fetching arbitrary user-supplied URLs
@@ -25,7 +26,7 @@ All notable changes to mcp-safeguard are documented here.
 - `mcp-safeguard` now operates as an MCP server itself (dog-fooding security)
 
 ### Changed
-- Prompt injection rules expanded from 12 to 19 patterns (PI-001–PI-019)
+- Prompt injection rules expanded from 12 to 15 patterns (PI-001–PI-015)
 - Credential exposure patterns expanded to 25 (added JWT, Bearer token, OAuth patterns)
 - Endpoint exposure probes: 28 probes + 12 port checks (was 20+8)
 - CLI interface redesigned for better UX

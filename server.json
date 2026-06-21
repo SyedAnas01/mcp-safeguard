@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.syedanas01/mcp-safeguard",
-  "description": "Security scanner for MCP servers — automatically detect prompt injection, credential leaks, SSRF vulnerabilities, and tool poisoning with 55 CVSS-scored rules across 5 attack categories.",
+  "description": "Security scanner for MCP servers — automatically detect prompt injection, credential leaks, SSRF vulnerabilities, and tool poisoning with 52 CVSS-scored detection rules, plus endpoint and dangerous-port probes.",
   "repository": {
     "url": "https://github.com/SyedAnas01/mcp-safeguard",
     "source": "github"
@@ -31,7 +31,7 @@
   "tools": [
     {
       "name": "scan_config",
-      "description": "Scan an MCP server configuration file for security vulnerabilities. Detects prompt injection (PI-001–PI-019), credential leaks (CRED-001–025), SSRF risks (SS-001–003), and tool poisoning (TP-001–008). Returns CVSS-scored findings with remediation guidance.",
+      "description": "Scan an MCP server configuration file for security vulnerabilities. Detects prompt injection (PI-001–PI-015), credential leaks (CRED-001–025), SSRF risks (SS-001–004), and tool poisoning (TP-001–008). Returns CVSS-scored findings with remediation guidance.",
       "inputSchema": {
         "type": "object",
         "properties": {

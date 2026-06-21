@@ -28,7 +28,7 @@ def setup_tracing(
     """
     global _tracer
 
-    resource = Resource.create({"service.name": service_name, "service.version": "0.1.0"})
+    resource = Resource.create({"service.name": service_name, "service.version": "0.3.0"})
     provider = TracerProvider(resource=resource)
 
     if otlp_endpoint:

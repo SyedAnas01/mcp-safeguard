@@ -21,7 +21,7 @@ What you expected to happen.
 **Environment**
 - OS: [e.g. macOS 14, Ubuntu 22.04]
 - Python version: [e.g. 3.12]
-- mcp-safeguard version: [e.g. 0.1.0]
+- mcp-safeguard version: [e.g. 0.3.0]
 
 **Additional context**
 Any other context, logs, or screenshots.
