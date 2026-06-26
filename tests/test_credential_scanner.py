@@ -52,6 +52,14 @@ def test_detects_database_url():
     assert any("CRED-011" in r for r in rule_ids)
 
 
+def test_detects_hugging_face_token():
+    token = "hf_" + "a" * 34
+    config = {"env": {"HF_TOKEN": token}}
+    findings = scan_for_credentials(config)
+    rule_ids = [f.rule_id for f in findings]
+    assert any("CRED-026" in r for r in rule_ids)
+
+
 def test_credential_evidence_is_masked():
     config = {"env": {"SECRET": "sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890abcdefghij"}}
     findings = scan_for_credentials(config)
