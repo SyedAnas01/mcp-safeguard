@@ -28,7 +28,7 @@ class CredentialFinding:
 _CREDENTIAL_PATTERNS: list[tuple[str, Severity, str, str, float]] = [
     # API Keys and tokens
     (
-        r"(?i)(sk|pk|rk|ak)[-_]?(live|test|secret|prod|dev)?[-_]?[A-Za-z0-9]{20,}",
+        r"(?i)\b(sk|pk|rk|ak)[-_](live|test|secret|prod|dev)?[-_]?[A-Za-z0-9]{20,}",
         Severity.CRITICAL,
         "CRED-001",
         "Hardcoded API Key",
@@ -308,13 +308,15 @@ def scan_for_credentials(config: dict[str, Any]) -> list[CredentialFinding]:
                     )
 
     findings.sort(key=lambda f: f.cvss_score, reverse=True)
-    # Deduplicate by rule_id + location
+    # Deduplicate by masked evidence: the same underlying credential can trip
+    # multiple rules (generic + vendor-specific + env-name-based). Keep only
+    # the highest-CVSS finding per distinct credential (findings are already
+    # sorted by CVSS descending, so the first occurrence wins).
     seen: set[str] = set()
     unique: list[CredentialFinding] = []
     for f in findings:
-        key = f"{f.rule_id}:{f.location}:{f.evidence[:20]}"
-        if key not in seen:
-            seen.add(key)
+        if f.evidence not in seen:
+            seen.add(f.evidence)
             unique.append(f)
     return unique
 

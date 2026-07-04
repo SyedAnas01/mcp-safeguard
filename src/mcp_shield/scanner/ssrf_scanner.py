@@ -50,7 +50,6 @@ _URL_PARAM_PATTERNS = re.compile(
 _SAFE_CONSTRAINTS = {
     "enum",     # Restricts to a fixed set of values
     "const",    # Single allowed value
-    "format",   # format: uri with pattern can restrict
 }
 
 # Patterns in description text indicating URL validation is in place

@@ -266,3 +266,85 @@ def test_tool_risk_level_is_valid_severity():
         Severity.LOW,
         Severity.INFO,
     )
+
+
+# ---------------------------------------------------------------------------
+# compare_scans — rug-pull / tool-definition-change detection
+# ---------------------------------------------------------------------------
+
+
+def _base_scan_record(tool_hashes: dict[str, str]) -> dict:
+    """Build a minimal stand-in scan record as stored in _scan_history."""
+    return {
+        "summary": {"overall_cvss": 5.0, "total_findings": 1, "target": "http://x"},
+        "injection_findings": [{"rule_id": "PI-001"}],
+        "credential_findings": [],
+        "endpoint_findings": [],
+        "tool_poisoning_findings": [],
+        "raw_metadata": {"tool_hashes": tool_hashes},
+    }
+
+
+async def test_compare_scans_detects_changed_tool_hash_as_regression():
+    """
+    Two scans of the same tool name, same findings, but a description change
+    that trips no existing regex rule must still surface as a changed_tools
+    regression via the hash-based rug-pull check.
+    """
+    from mcp_shield.server import _scan_history, compare_scans
+
+    id1 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    id2 = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    _scan_history[id1] = _base_scan_record({"add": "hash_v1"})
+    _scan_history[id2] = _base_scan_record({"add": "hash_v2"})
+
+    result = await compare_scans(id1, id2)
+
+    assert result["changed_tools"] == ["add"]
+    assert result["regression_detected"] is True
+
+
+async def test_compare_scans_reports_added_and_removed_tools():
+    from mcp_shield.server import _scan_history, compare_scans
+
+    id1 = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    id2 = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    _scan_history[id1] = _base_scan_record({"old_tool": "h1"})
+    _scan_history[id2] = _base_scan_record({"new_tool": "h2"})
+
+    result = await compare_scans(id1, id2)
+
+    assert result["added_tools"] == ["new_tool"]
+    assert result["removed_tools"] == ["old_tool"]
+    assert result["changed_tools"] == []
+
+
+# ---------------------------------------------------------------------------
+# Auth enforcement — gated @mcp.tool functions
+# ---------------------------------------------------------------------------
+
+
+async def test_gated_tool_rejects_unauthenticated_request_when_api_key_configured(monkeypatch):
+    """
+    When an API key is configured, calling a gated tool with no auth headers
+    present (as happens outside of a real HTTP request context) must return
+    exactly the authentication-required error, not proceed with the scan.
+    """
+    from mcp_shield.config import settings
+    from mcp_shield.server import get_scan_history
+
+    monkeypatch.setattr(settings, "api_key", "configured-secret-key")
+
+    result = await get_scan_history()
+
+    assert result == {"error": "Authentication required."}
+
+
+async def test_check_auth_returns_none_when_no_api_key_configured(monkeypatch):
+    """Open access must be preserved when no api_key is configured (local/stdio use)."""
+    from mcp_shield.config import settings
+    from mcp_shield.server import _check_auth
+
+    monkeypatch.setattr(settings, "api_key", None)
+
+    assert _check_auth() is None

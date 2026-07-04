@@ -1,4 +1,4 @@
-"""OpenTelemetry tracing for mcp-shield scan operations."""
+"""OpenTelemetry tracing for mcp-safeguard scan operations."""
 
 from __future__ import annotations
 
@@ -12,11 +12,13 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
+from mcp_shield import __version__
+
 _tracer: trace.Tracer | None = None
 
 
 def setup_tracing(
-    service_name: str = "mcp-shield",
+    service_name: str = "mcp-safeguard",
     otlp_endpoint: str | None = None,
 ) -> None:
     """
@@ -28,7 +30,7 @@ def setup_tracing(
     """
     global _tracer
 
-    resource = Resource.create({"service.name": service_name, "service.version": "0.3.0"})
+    resource = Resource.create({"service.name": service_name, "service.version": __version__})
     provider = TracerProvider(resource=resource)
 
     if otlp_endpoint:

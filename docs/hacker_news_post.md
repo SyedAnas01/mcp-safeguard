@@ -1,6 +1,6 @@
 # Hacker News Post
 
-**Title:** Show HN: mcp-shield – Security scanner for MCP servers (prompt injection, credential leaks, tool poisoning)
+**Title:** Show HN: mcp-safeguard – Security scanner for MCP servers (prompt injection, credential leaks, tool poisoning)
 
 ---
 
@@ -8,7 +8,7 @@
 
 Hey HN,
 
-I built mcp-shield — an open-source security scanner for MCP (Model Context Protocol) servers. Think of it as Snyk or Semgrep, but specifically for the attack surfaces that MCP introduces.
+I built mcp-safeguard — an open-source security scanner for MCP (Model Context Protocol) servers. Think of it as Snyk or Semgrep, but specifically for the attack surfaces that MCP introduces.
 
 **The problem it solves:**
 
@@ -22,7 +22,7 @@ MCP servers expose AI agents to real-world systems: filesystems, databases, APIs
 
 4. **Tool poisoning** — Third-party MCP tools can be designed to look benign but silently exfiltrate data or suppress logging. The description says "search files" but also does something else.
 
-**What mcp-shield does:**
+**What mcp-safeguard does:**
 
 - Detects 15+ prompt injection patterns via regex analysis of tool definitions
 - Identifies 17 credential leak patterns (AWS keys, JWT tokens, private keys, etc.)
@@ -40,7 +40,7 @@ MCP servers expose AI agents to real-world systems: filesystems, databases, APIs
 - No runtime instrumentation yet — this is static analysis + probe-based detection
 - v0.1.0 — more rules and transport-level scanning coming
 
-GitHub: https://github.com/mcp-shield/mcp-shield
-PyPI: pip install mcp-shield
+GitHub: https://github.com/mcp-safeguard/mcp-safeguard
+PyPI: pip install mcp-safeguard
 
 Happy to discuss the threat model or specific detection rules. What attack surfaces am I missing?

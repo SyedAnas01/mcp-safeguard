@@ -1,6 +1,6 @@
 # dev.to Article
 
-**Title:** Building mcp-shield: A Security Scanner for MCP Servers
+**Title:** Building mcp-safeguard: A Security Scanner for MCP Servers
 
 **Tags:** security, ai, mcp, opensource
 
@@ -10,7 +10,7 @@ The Model Context Protocol has quietly become the backbone of AI agent tooling. 
 
 That trust is exactly what makes MCP security critical — and underexplored.
 
-I built **mcp-shield**, an open-source security scanner for MCP servers. In this post I'll walk through the threat model, how the scanner works, and how to add it to your workflow in five minutes.
+I built **mcp-safeguard**, an open-source security scanner for MCP servers. In this post I'll walk through the threat model, how the scanner works, and how to add it to your workflow in five minutes.
 
 ## The MCP Security Threat Model
 
@@ -31,7 +31,7 @@ That creates a injection vector.
 
 This isn't hypothetical. Third-party MCP tools can be designed to include these instructions deliberately. The AI processes the tool definition as trusted content, and the injection is invisible to the user.
 
-mcp-shield detects 15 injection patterns including:
+mcp-safeguard detects 15 injection patterns including:
 - Instruction override phrases ("ignore previous instructions")
 - Identity hijacking ("you are now", "act as")
 - Fake system messages (`\nsystem:`)
@@ -59,7 +59,7 @@ MCP servers are configured in JSON files like `claude_desktop_config.json`. Thes
 
 I've seen exactly this pattern shared in public GitHub repos, forum posts, and documentation examples.
 
-mcp-shield checks for 17 credential types: AWS keys, JWT tokens, Stripe keys, database URLs, GitHub PATs, private key material, and more.
+mcp-safeguard checks for 17 credential types: AWS keys, JWT tokens, Stripe keys, database URLs, GitHub PATs, private key material, and more.
 
 ### Threat 3: Exposed Endpoints
 
@@ -80,11 +80,11 @@ The most sophisticated attack: a tool that looks benign but has hidden effects.
 
 Key indicators: "also", "transparently", "silently", "without notifying", "user won't notice".
 
-mcp-shield has 8 poisoning detection rules that catch these patterns.
+mcp-safeguard has 8 poisoning detection rules that catch these patterns.
 
 ## Building the Scanner
 
-I built mcp-shield as an MCP server itself, using FastMCP. This means it integrates directly with Claude Desktop and Cursor — you scan MCP servers from within Claude's chat interface.
+I built mcp-safeguard as an MCP server itself, using FastMCP. This means it integrates directly with Claude Desktop and Cursor — you scan MCP servers from within Claude's chat interface.
 
 ### Core Architecture
 
@@ -92,7 +92,7 @@ I built mcp-shield as an MCP server itself, using FastMCP. This means it integra
 from fastmcp import FastMCP
 
 mcp = FastMCP(
-    name="mcp-shield",
+    name="mcp-safeguard",
     instructions="Security scanner for MCP servers."
 )
 
@@ -165,14 +165,14 @@ def _is_ssrf_safe(host: str, allowlist: list[str] | None = None) -> bool:
     return host in safe_patterns
 ```
 
-By default, mcp-shield only scans localhost. You explicitly allowlist other hosts.
+By default, mcp-safeguard only scans localhost. You explicitly allowlist other hosts.
 
-## Using mcp-shield in 5 Minutes
+## Using mcp-safeguard in 5 Minutes
 
 ### Install
 
 ```bash
-pip install mcp-shield
+pip install mcp-safeguard
 ```
 
 ### Add to Claude Desktop
@@ -180,7 +180,7 @@ pip install mcp-shield
 ```json
 {
   "mcpServers": {
-    "mcp-shield": {
+    "mcp-safeguard": {
       "command": "python",
       "args": ["-m", "fastmcp", "run", "src/mcp_shield/server.py"]
     }
@@ -192,7 +192,7 @@ pip install mcp-shield
 
 In Claude Desktop, you can now ask:
 
-> "Use mcp-shield to scan these tool definitions for security issues: [paste your tools JSON]"
+> "Use mcp-safeguard to scan these tool definitions for security issues: [paste your tools JSON]"
 
 Claude will call `scan_tool_definitions` and return a structured report.
 
@@ -231,7 +231,7 @@ Produces a self-contained HTML report with color-coded severity levels, suitable
 
 The project is MIT licensed and actively accepting contributions. If you have detection rules to add, please open a PR.
 
-**GitHub:** https://github.com/mcp-shield/mcp-shield
-**Install:** `pip install mcp-shield`
+**GitHub:** https://github.com/mcp-safeguard/mcp-safeguard
+**Install:** `pip install mcp-safeguard`
 
 What attack surfaces did I miss? Let me know in the comments.

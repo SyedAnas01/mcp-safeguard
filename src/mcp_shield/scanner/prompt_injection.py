@@ -51,7 +51,7 @@ _INJECTION_PATTERNS: list[tuple[str, Severity, str, str, float]] = [
         8.1,
     ),
     (
-        r"(system\s*:?\s*|<\s*system\s*>|\\nsystem\b)",
+        r"(?i)(^|\n)\s*system\s*:|<\s*system\s*>|\\nsystem\b",
         Severity.HIGH,
         "PI-003",
         "Fake System Message Injection",
@@ -65,7 +65,8 @@ _INJECTION_PATTERNS: list[tuple[str, Severity, str, str, float]] = [
         9.1,
     ),
     (
-        r"<\s*(hidden|invisible|secret)\s*>.*?<\s*/\s*(hidden|invisible|secret)\s*>",
+        r"<\s*(hidden|invisible|secret|important|system|instructions?)\s*>.*?"
+        r"<\s*/\s*(hidden|invisible|secret|important|system|instructions?)\s*>",
         Severity.HIGH,
         "PI-005",
         "Hidden Instruction Tag",

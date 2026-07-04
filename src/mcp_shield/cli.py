@@ -121,6 +121,14 @@ def _run_scan(config_path: str, min_severity: str = "INFO",
     config = _load_config(config_path)
     tools = _extract_tools(config)
 
+    if not tools and config.get("mcpServers"):
+        print(
+            "Warning: no tool definitions found in 'mcpServers' entries. "
+            "Real Claude Desktop configs never embed tool definitions inline "
+            "(only command/args/env) — tool-based checks were skipped.",
+            file=sys.stderr,
+        )
+
     all_findings: list[dict[str, Any]] = []
 
     # --- Prompt Injection ---

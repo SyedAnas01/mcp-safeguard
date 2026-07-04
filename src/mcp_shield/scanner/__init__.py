@@ -1,1 +1,1 @@
-"""Scanner modules for mcp-shield."""
+"""Scanner modules for mcp-safeguard."""

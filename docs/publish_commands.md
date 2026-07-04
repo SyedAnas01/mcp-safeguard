@@ -1,6 +1,6 @@
 # Publish Commands
 
-Run these commands to publish mcp-shield to GitHub and PyPI.
+Run these commands to publish mcp-safeguard to GitHub and PyPI.
 
 ## Prerequisites
 
@@ -18,16 +18,16 @@ export PYPI_TOKEN=pypi-your-token-here
 ## Step 1: Publish to GitHub
 
 ```bash
-cd /Users/mr.syedanas/mcp-shield
+cd /Users/mr.syedanas/mcp-safeguard
 
 # Create the public GitHub repository and push all code
-gh repo create mcp-shield --public \
+gh repo create mcp-safeguard --public \
   --description "🛡️ Security scanner for MCP servers — detect prompt injection, credential leaks, exposed endpoints, and tool poisoning risks" \
   --push \
   --source .
 
 # Add repository topics
-gh repo edit mcp-shield \
+gh repo edit mcp-safeguard \
   --add-topic mcp \
   --add-topic security \
   --add-topic ai-security \
@@ -41,7 +41,7 @@ gh repo edit mcp-shield \
 # Create v0.1.0 release
 gh release create v0.1.0 \
   --title "v0.1.0 — Initial Release" \
-  --notes "First public release of mcp-shield.
+  --notes "First public release of mcp-safeguard.
 
 ## Highlights
 - 15+ prompt injection detection rules
@@ -55,24 +55,24 @@ gh release create v0.1.0 \
 
 ## Install
 \`\`\`bash
-pip install mcp-shield
+pip install mcp-safeguard
 \`\`\`
 
-See [README](https://github.com/mcp-shield/mcp-shield#readme) for full documentation." \
-  dist/mcp_shield-0.1.0.tar.gz \
-  dist/mcp_shield-0.1.0-py3-none-any.whl
+See [README](https://github.com/SyedAnas01/mcp-safeguard#readme) for full documentation." \
+  dist/mcp_safeguard-0.3.2.tar.gz \
+  dist/mcp_safeguard-0.3.2-py3-none-any.whl
 ```
 
 ## Step 2: Publish to PyPI
 
 ```bash
-cd /Users/mr.syedanas/mcp-shield
+cd /Users/mr.syedanas/mcp-safeguard
 
 # Upload to PyPI
 TWINE_PASSWORD=$PYPI_TOKEN .venv/bin/twine upload dist/* --username __token__
 
 # Verify installation
-pip install mcp-shield
+pip install mcp-safeguard
 ```
 
 ## Step 3: Verify
