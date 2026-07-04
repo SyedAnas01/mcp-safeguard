@@ -1,3 +1,4 @@
+<!-- mcp-name: com.cognivators/mcp-safeguard -->
 <div align="center">
 
 # 🛡️ mcp-safeguard
@@ -7,11 +8,11 @@
 Detect prompt injection · credential leaks · exposed endpoints · tool poisoning
 
 [![PyPI version](https://badge.fury.io/py/mcp-safeguard.svg)](https://pypi.org/project/mcp-safeguard/)
-[![CI](https://github.com/SyedAnas01/mcp-safeguard/actions/workflows/ci.yml/badge.svg)](https://github.com/SyedAnas01/mcp-safeguard/actions)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20502474.svg)](https://doi.org/10.5281/zenodo.20502474)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Listed on mcpservers.org](https://img.shields.io/badge/listed%20on-mcpservers.org-blueviolet)](https://mcpservers.org/servers/syedanas01/mcp-safeguard)
-[![Stars](https://img.shields.io/github/stars/SyedAnas01/mcp-safeguard?style=social)](https://github.com/SyedAnas01/mcp-safeguard/stargazers)
+[![GitLab](https://img.shields.io/badge/GitLab-repo-fc6d26?logo=gitlab)](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard)
 
 ```bash
 pip install mcp-safeguard
@@ -26,14 +27,14 @@ mcp-safeguard scan your-config.json
 
 ```bash
 pip install mcp-safeguard
-git clone https://github.com/SyedAnas01/mcp-safeguard && cd mcp-safeguard
+git clone https://gitlab.com/anasmohiuddinsyed/mcp-safeguard && cd mcp-safeguard
 mcp-safeguard scan examples/demo-vulnerable-config.json
 ```
 
 ```
 ┌─────────────────────────────────────────────────┐
 │  mcp-safeguard  —  MCP Security Scanner         │
-│  github.com/SyedAnas01/mcp-safeguard            │
+│  gitlab.com/anasmohiuddinsyed/mcp-safeguard            │
 └─────────────────────────────────────────────────┘
 
 Scanning: examples/demo-vulnerable-config.json
@@ -74,7 +75,7 @@ Scanning: examples/demo-vulnerable-config.json
 
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io) connects AI agents — Claude, Cursor, Windsurf, GPT — to real-world tools: your filesystem, databases, shell, APIs. It's growing fast. The security tooling hasn't kept up.
 
-**mcp-safeguard is an automated security scanner purpose-built for MCP.** It audits tool definitions and server configs for the attack surfaces OWASP classified in 2026.
+**mcp-safeguard is an open-source automated security scanner purpose-built for MCP.** It audits tool definitions and server configs for the attack surfaces OWASP classified in 2026.
 
 ---
 
@@ -196,6 +197,48 @@ fastmcp run src/mcp_shield/server.py
 # SSE transport (for remote clients)
 fastmcp run src/mcp_shield/server.py --transport sse --port 8000
 ```
+
+---
+
+## CI/CD Integration
+
+Drop mcp-safeguard into your pipeline so MCP configs are scanned on every change. It exits non-zero when it finds issues at or above your chosen severity, so a vulnerable config fails the build.
+
+**pre-commit** (`.pre-commit-config.yaml`):
+
+```yaml
+repos:
+  - repo: https://gitlab.com/anasmohiuddinsyed/mcp-safeguard
+    rev: v0.3.0
+    hooks:
+      - id: mcp-safeguard
+```
+
+**GitHub Actions** (`.github/workflows/mcp-security.yml`):
+
+```yaml
+name: MCP Security Scan
+on: [push, pull_request]
+jobs:
+  mcp-safeguard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install mcp-safeguard
+      - run: mcp-safeguard scan mcp.json --fail-on HIGH --format json --output mcp-findings.json
+```
+
+**GitLab CI** (`.gitlab-ci.yml`):
+
+```yaml
+mcp-safeguard:
+  image: python:3.12
+  script:
+    - pip install mcp-safeguard
+    - mcp-safeguard scan mcp.json --fail-on HIGH
+```
+
+Point the scan at your own MCP config path (e.g. `claude_desktop_config.json`). Use `--fail-on CRITICAL` for a softer gate, or `--format json --output report.json` to archive results.
 
 ---
 
@@ -363,7 +406,7 @@ External research confirms the threat is real: [MCPTox (2025)](https://arxiv.org
 
 OWASP officially added **MCP Tool Poisoning** to their 2026 threat guidance — the same vulnerability category mcp-safeguard's `TP-*` rules detect.
 
-**The gap**: The MCP ecosystem grew from zero to 10,000+ servers in 18 months with security tooling lagging far behind. mcp-safeguard addresses this with automated scanning built specifically for MCP's attack surface — tool definitions, server configs, and SSRF exposure via prompt injection.
+**The gap**: The MCP ecosystem grew from zero to 10,000+ servers in 18 months while security tooling lagged behind. mcp-safeguard is an open-source scanner built specifically for MCP's attack surface — tool definitions, server configs, and SSRF exposure via prompt injection.
 
 The vulnerability patterns mcp-safeguard detects are documented with illustrative examples in [SECURITY-HALL-OF-SHAME.md](SECURITY-HALL-OF-SHAME.md). Run mcp-safeguard on your own servers and contribute real scan results via GitHub Issues or Discussions.
 
@@ -371,17 +414,15 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 
 ---
 
-## Recognition & Coverage
+## Project Resources & Standards Work
 
 ### 📰 Press & Community
 - **[Hacker News](https://news.ycombinator.com/item?id=48242541)** — "MCP-safeguard: Security scanner for MCP servers" (2026-05-22)
-- Open PR to OWASP MCP Top 10 adding an SSRF prevention/detection control ([PR #42](https://github.com/OWASP/www-project-mcp-top-10/pull/42), under review)
-- arXiv preprint in preparation: "mcp-safeguard: Automated Security Analysis for MCP Deployments" (cs.AI/cs.CR)
+- **[IETF Internet-Draft](https://datatracker.ietf.org/doc/draft-mohiuddin-mcp-security-considerations/)** — draft-mohiuddin-mcp-security-considerations-00, security considerations for the Model Context Protocol
+- **OWASP MCP Top 10** — Open PR adding an SSRF prevention/detection recommended control ([PR #42](https://github.com/OWASP/www-project-mcp-top-10/pull/42), under review)
 
-### 🔒 Security Disclosures Filed
-- **[modelcontextprotocol/servers #4234](https://github.com/modelcontextprotocol/servers/issues/4234)** — Security considerations for MCP server deployments
+### 🔒 Real-World Fix Credited
 - **googleapis/mcp-toolbox** — SSRF via redirect chain (CWE-918, fix in [PR #3448](https://github.com/googleapis/mcp-toolbox/pull/3448), reported by Syed Anas Mohiuddin)
-- CVE filings in progress (90-day responsible disclosure timeline)
 
 ### 📋 Awesome Lists PRs Open
 - [awesome-python](https://github.com/vinta/awesome-python) (299K ⭐)
@@ -390,6 +431,8 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 - [Prompt-Engineering-Guide](https://github.com/dair-ai/Prompt-Engineering-Guide) (74K ⭐)
 - [the-book-of-secret-knowledge](https://github.com/trimstray/the-book-of-secret-knowledge)
 - And 9 more awesome lists
+
+Using mcp-safeguard in your pipeline, or found a real issue with it? We welcome scan results and contributions — open a [Discussion](https://github.com/SyedAnas01/mcp-safeguard/discussions) or PR.
 
 ---
 
@@ -406,7 +449,7 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 ## Contributing
 
 ```bash
-git clone https://github.com/SyedAnas01/mcp-safeguard
+git clone https://gitlab.com/anasmohiuddinsyed/mcp-safeguard
 cd mcp-safeguard
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
@@ -432,6 +475,6 @@ MIT — see [LICENSE](LICENSE).
 
 **If this helped you, please ⭐ the repo — it helps others find it.**
 
-[GitHub](https://github.com/SyedAnas01/mcp-safeguard) · [PyPI](https://pypi.org/project/mcp-safeguard/) · [Issues](https://github.com/SyedAnas01/mcp-safeguard/issues)
+[GitHub](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard) · [PyPI](https://pypi.org/project/mcp-safeguard/) · [Issues](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard/issues)
 
 </div>

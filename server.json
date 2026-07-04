@@ -1,12 +1,12 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.syedanas01/mcp-safeguard",
-  "description": "Security scanner for MCP servers — automatically detect prompt injection, credential leaks, SSRF vulnerabilities, and tool poisoning with 52 CVSS-scored detection rules, plus endpoint and dangerous-port probes.",
+  "description": "Security scanner for MCP servers — automatically detect prompt injection, credential leaks, SSRF vulnerabilities, and tool poisoning, plus endpoint and dangerous-port probes.",
   "repository": {
     "url": "https://github.com/SyedAnas01/mcp-safeguard",
     "source": "github"
   },
-  "version": "0.3.0",
+  "version": "0.3.2",
   "homepage": "https://github.com/SyedAnas01/mcp-safeguard",
   "license": "MIT",
   "author": {
@@ -14,13 +14,25 @@
     "email": "syed.anas@cognivators.com",
     "url": "https://github.com/SyedAnas01"
   },
-  "categories": ["security", "developer-tools", "testing"],
-  "tags": ["security", "mcp", "prompt-injection", "ssrf", "credential-scanning", "ai-security", "llm-security"],
+  "categories": [
+    "security",
+    "developer-tools",
+    "testing"
+  ],
+  "tags": [
+    "security",
+    "mcp",
+    "prompt-injection",
+    "ssrf",
+    "credential-scanning",
+    "ai-security",
+    "llm-security"
+  ],
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcp-safeguard",
-      "version": "0.3.0",
+      "version": "0.3.2",
       "transport": {
         "type": "stdio"
       },
@@ -31,7 +43,7 @@
   "tools": [
     {
       "name": "scan_config",
-      "description": "Scan an MCP server configuration file for security vulnerabilities. Detects prompt injection (PI-001–PI-015), credential leaks (CRED-001–025), SSRF risks (SS-001–004), and tool poisoning (TP-001–008). Returns CVSS-scored findings with remediation guidance.",
+      "description": "Scan an MCP server configuration file for security vulnerabilities. Detects prompt injection, credential leaks, SSRF risks, and tool poisoning. Returns CVSS-scored findings with remediation guidance.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -41,12 +53,20 @@
           },
           "min_severity": {
             "type": "string",
-            "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+            "enum": [
+              "CRITICAL",
+              "HIGH",
+              "MEDIUM",
+              "LOW",
+              "INFO"
+            ],
             "default": "INFO",
             "description": "Minimum severity level to report"
           }
         },
-        "required": ["config_path"]
+        "required": [
+          "config_path"
+        ]
       }
     },
     {
@@ -60,7 +80,9 @@
             "description": "Array of MCP tool definition objects with name, description, and inputSchema"
           }
         },
-        "required": ["tools"]
+        "required": [
+          "tools"
+        ]
       }
     }
   ]

@@ -60,3 +60,6 @@ htmlcov/
 .env.local
 .env.production
 secrets.json
+
+dist_new/
+.mcp-publisher-key
