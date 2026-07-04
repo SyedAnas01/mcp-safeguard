@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import socket
 from dataclasses import dataclass
 
 import httpx
 
+from mcp_shield import __version__
+
 from .prompt_injection import Severity
+
+# Cloud metadata IPs to block regardless of hostname (DNS-rebinding guard)
+_METADATA_IPS = {"169.254.169.254", "fd00:ec2::254"}
+
+# Link-local ranges: attacker-controlled DNS can rebind an allowlisted hostname
+# to one of these at request time, bypassing a hostname-only allowlist check.
+_LINK_LOCAL_NETWORKS = [
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("fe80::/10"),
+]
 
 
 @dataclass
@@ -113,12 +126,42 @@ def _is_ssrf_safe(host: str, allowlist: list[str] | None = None) -> bool:
     safe_patterns = allowlist or ["localhost", "127.0.0.1", "::1", "0.0.0.0"]
     if host in safe_patterns:
         return True
+    # Block cloud metadata endpoints — must be checked before the .local/.internal
+    # allowance below, since metadata.google.internal ends with ".internal".
+    if host in ("169.254.169.254", "metadata.google.internal", "fd00:ec2::254"):
+        return False
     # Also allow local hostnames
     if host.endswith(".local") or host.endswith(".internal"):
         return True
-    # Block cloud metadata endpoints
-    if host in ("169.254.169.254", "metadata.google.internal", "fd00:ec2::254"):
+    return False
+
+
+def _resolves_to_unsafe_ip(host: str) -> bool:
+    """
+    DNS-rebinding guard: resolve `host` and reject if any resolved address is
+    a cloud metadata IP or a link-local address (169.254.0.0/16, fe80::/10).
+
+    An allowlisted-looking hostname can still be rebound via DNS to point at
+    the cloud metadata endpoint at request time, so hostname-only allowlist
+    checks are not sufficient on their own.
+    """
+    try:
+        addrinfo = socket.getaddrinfo(host, None)
+    except OSError:
+        # Resolution failure — not our concern here, the HTTP client will fail too.
         return False
+
+    for _family, _type, _proto, _canonname, sockaddr in addrinfo:
+        ip_str = sockaddr[0]
+        if ip_str in _METADATA_IPS:
+            return True
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        if any(ip in network for network in _LINK_LOCAL_NETWORKS):
+            return True
+
     return False
 
 
@@ -153,7 +196,7 @@ async def scan_endpoints(
     """
     findings: list[EndpointFinding] = []
 
-    if not _is_ssrf_safe(host, ssrf_allowlist):
+    if not _is_ssrf_safe(host, ssrf_allowlist) or _resolves_to_unsafe_ip(host):
         return [
             EndpointFinding(
                 rule_id="EP-SSRF-001",
@@ -190,8 +233,8 @@ async def scan_endpoints(
     async with httpx.AsyncClient(
         timeout=timeout,
         verify=False,
-        follow_redirects=True,
-        headers={"User-Agent": "mcp-safeguard/0.3.0 security-scanner"},
+        follow_redirects=False,
+        headers={"User-Agent": f"mcp-safeguard/{__version__} security-scanner"},
     ) as client:
         for path, severity, rule_id, title, cvss_score in _SENSITIVE_PATHS:
             try:

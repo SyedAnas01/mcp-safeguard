@@ -43,5 +43,5 @@ jobs:
           context: .
           push: true
           tags: |
-            mcpshield/mcp-shield:latest
-            mcpshield/mcp-shield:${{ github.event.release.tag_name }}
+            syedanas01/mcp-safeguard:latest
+            syedanas01/mcp-safeguard:${{ github.event.release.tag_name }}

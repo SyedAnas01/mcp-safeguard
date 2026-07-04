@@ -38,7 +38,7 @@ This is the most subtle attack: a third-party MCP tool designed to appear safe w
 
 ## What I Built
 
-**mcp-shield** is an open-source MCP server that scans other MCP servers for these vulnerabilities.
+**mcp-safeguard** is an open-source MCP server that scans other MCP servers for these vulnerabilities.
 
 It detects:
 - 15+ prompt injection patterns in tool definitions
@@ -56,10 +56,10 @@ MCP adoption is accelerating fast. New MCP servers are published daily. Enterpri
 
 The supply chain risk is real. Before we install an npm package in production, we check it for vulnerabilities. We should do the same for MCP tools.
 
-mcp-shield is my contribution to building that foundation.
+mcp-safeguard is my contribution to building that foundation.
 
-**GitHub:** https://github.com/mcp-shield/mcp-shield
-**Install:** `pip install mcp-shield`
+**GitHub:** https://github.com/SyedAnas01/mcp-safeguard
+**Install:** `pip install mcp-safeguard`
 
 Open source, MIT licensed. Contributions welcome — especially new detection rules.
 

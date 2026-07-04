@@ -1,4 +1,4 @@
-"""Prometheus metrics for mcp-shield."""
+"""Prometheus metrics for mcp-safeguard."""
 
 from __future__ import annotations
 

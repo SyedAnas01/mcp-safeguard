@@ -5,6 +5,7 @@ import pytest
 from mcp_shield.scanner.endpoint_scanner import (
     _is_ssrf_safe,
     _port_open,
+    _resolves_to_unsafe_ip,
 )
 from mcp_shield.scanner.prompt_injection import Severity
 
@@ -25,6 +26,12 @@ def test_cloud_metadata_is_not_safe():
     assert _is_ssrf_safe("169.254.169.254") is False
 
 
+def test_gcp_metadata_internal_suffix_is_not_safe():
+    """metadata.google.internal ends with '.internal' but must still be blocked —
+    the metadata blocklist must be checked before the .internal/.local allowance."""
+    assert _is_ssrf_safe("metadata.google.internal") is False
+
+
 def test_external_ip_not_safe_without_allowlist():
     assert _is_ssrf_safe("8.8.8.8") is False
 
@@ -35,6 +42,17 @@ def test_allowlisted_host_is_safe():
 
 def test_local_suffix_is_safe():
     assert _is_ssrf_safe("mcp-server.local") is True
+
+
+def test_resolves_to_unsafe_ip_rejects_link_local():
+    """A hostname that resolves to a link-local/metadata IP must be rejected —
+    guards against DNS rebinding where an allowlisted-looking name resolves
+    to 169.254.169.254 at request time."""
+    assert _resolves_to_unsafe_ip("169.254.169.254") is True
+
+
+def test_resolves_to_unsafe_ip_allows_loopback():
+    assert _resolves_to_unsafe_ip("127.0.0.1") is False
 
 
 def test_closed_port_returns_false():

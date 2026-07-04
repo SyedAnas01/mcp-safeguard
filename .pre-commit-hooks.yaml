@@ -2,7 +2,7 @@
 # Users add this to their .pre-commit-config.yaml to scan MCP configs on every commit:
 #
 #   repos:
-#     - repo: https://gitlab.com/anasmohiuddinsyed/mcp-safeguard
+#     - repo: https://github.com/SyedAnas01/mcp-safeguard
 #       rev: v0.3.0
 #       hooks:
 #         - id: mcp-safeguard

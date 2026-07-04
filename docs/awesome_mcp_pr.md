@@ -1,15 +1,15 @@
 # PR for awesome-mcp-servers
 
-**Title:** Add mcp-shield — security scanner for MCP servers
+**Title:** Add mcp-safeguard — security scanner for MCP servers
 
 ---
 
 **Description:**
 
-This PR adds **mcp-shield** to the Security Tools section of the awesome-mcp-servers list.
+This PR adds **mcp-safeguard** to the Security Tools section of the awesome-mcp-servers list.
 
 **What it does:**
-mcp-shield is an MCP server that scans other MCP servers for security vulnerabilities. It detects prompt injection patterns in tool definitions, credential leaks in server configurations, exposed admin endpoints, and tool poisoning risks. Findings are CVSS-scored with remediation guidance.
+mcp-safeguard is an MCP server that scans other MCP servers for security vulnerabilities. It detects prompt injection patterns in tool definitions, credential leaks in server configurations, exposed admin endpoints, and tool poisoning risks. Findings are CVSS-scored with remediation guidance.
 
 **Why it belongs here:**
 - It is itself an MCP server (FastMCP-based)
@@ -18,8 +18,8 @@ mcp-shield is an MCP server that scans other MCP servers for security vulnerabil
 - MIT licensed, actively maintained, 50+ tests
 
 **Links:**
-- GitHub: https://github.com/mcp-shield/mcp-shield
-- PyPI: https://pypi.org/project/mcp-shield/
+- GitHub: https://github.com/mcp-safeguard/mcp-safeguard
+- PyPI: https://pypi.org/project/mcp-safeguard/
 - License: MIT
 
 **Proposed entry:**
@@ -27,5 +27,5 @@ mcp-shield is an MCP server that scans other MCP servers for security vulnerabil
 ```markdown
 ## Security
 
-- [mcp-shield](https://github.com/mcp-shield/mcp-shield) - Security scanner for MCP servers. Detects prompt injection in tool definitions, credential leaks, exposed endpoints, and tool poisoning risks. Generates CVSS-scored HTML reports.
+- [mcp-safeguard](https://github.com/mcp-safeguard/mcp-safeguard) - Security scanner for MCP servers. Detects prompt injection in tool definitions, credential leaks, exposed endpoints, and tool poisoning risks. Generates CVSS-scored HTML reports.
 ```

@@ -1,5 +1,5 @@
 """
-mcp-shield: FastMCP security scanner server.
+mcp-safeguard: FastMCP security scanner server.
 
 Exposes MCP Tools, Resources, and Prompts for scanning MCP servers
 for prompt injection, credential leaks, endpoint exposure, and tool poisoning.
@@ -8,6 +8,7 @@ for prompt injection, credential leaks, endpoint exposure, and tool poisoning.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
@@ -18,7 +19,9 @@ from typing import Any
 
 import httpx
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 
+from mcp_shield import __version__
 from mcp_shield.config import settings
 from mcp_shield.observability.metrics import (
     active_scans,
@@ -35,8 +38,14 @@ from mcp_shield.scanner.report_generator import (
     generate_scan_summary,
     report_to_dict,
 )
-from mcp_shield.scanner.tool_analyzer import analyze_tool_risk, scan_for_tool_poisoning
+from mcp_shield.scanner.ssrf_scanner import scan_for_ssrf
+from mcp_shield.scanner.tool_analyzer import (
+    analyze_tool_risk,
+    hash_tool_definitions,
+    scan_for_tool_poisoning,
+)
 from mcp_shield.security.audit_logger import audit_logger
+from mcp_shield.security.auth_middleware import authenticate_request
 from mcp_shield.security.input_validator import (
     ValidationError,
     sanitize_scan_id,
@@ -47,6 +56,8 @@ from mcp_shield.security.input_validator import (
 )
 from mcp_shield.security.rate_limiter import RateLimiter
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Initialisation
 # ---------------------------------------------------------------------------
@@ -54,9 +65,9 @@ from mcp_shield.security.rate_limiter import RateLimiter
 setup_tracing(otlp_endpoint=settings.otlp_endpoint)
 
 mcp = FastMCP(
-    name="mcp-shield",
+    name="mcp-safeguard",
     instructions=(
-        "mcp-shield is a security scanner for MCP servers. "
+        "mcp-safeguard is a security scanner for MCP servers. "
         "Use scan_mcp_server to run a full security audit, "
         "scan_tool_definitions to check for prompt injection, "
         "check_auth_config to audit credentials and OAuth scopes, "
@@ -110,6 +121,68 @@ def _client_id_from_env() -> str:
     return os.environ.get("MCP_SHIELD_CLIENT_ID", "local")
 
 
+async def _fetch_tools_via_mcp(url: str, auth_token: str = "") -> list[dict[str, Any]]:
+    """
+    Fetch tool definitions from a target MCP server via the real MCP protocol
+    handshake (initialize + tools/list), instead of an OpenAPI-style HTTP GET.
+
+    Args:
+        url: The MCP server URL to connect to.
+        auth_token: Optional bearer token to authenticate with the server.
+
+    Returns:
+        List of tool definition dicts ({"name", "description", "inputSchema"}),
+        or an empty list on any connection/protocol failure.
+    """
+    from fastmcp import Client
+
+    try:
+        client = Client(url, auth=auth_token or None, timeout=settings.max_scan_timeout)
+        async with client:
+            mcp_tools = await client.list_tools()
+        return [
+            {
+                "name": t.name,
+                "description": t.description or "",
+                "inputSchema": t.inputSchema,
+            }
+            for t in mcp_tools
+        ]
+    except Exception:
+        return []
+
+
+def _check_auth() -> dict[str, str] | None:
+    """
+    Enforce authentication for network-capable tools when an API key is configured.
+
+    Returns:
+        None if the request is authenticated (or no api_key is configured, which
+        preserves open access for local/stdio use). Otherwise an error dict to
+        return immediately from the calling tool.
+    """
+    if not settings.api_key:
+        return None
+
+    # fastmcp strips the Authorization header by default; explicitly include it.
+    headers = get_http_headers(include={"authorization"})
+    ctx = authenticate_request(
+        api_key_header=headers.get("x-api-key"),
+        authorization_header=headers.get("authorization"),
+        expected_api_key=settings.api_key,
+    )
+    if not ctx.authenticated:
+        return {"error": "Authentication required."}
+    return None
+
+
+if not settings.api_key:
+    logger.warning(
+        "mcp-safeguard is running without an API key configured — all tools are "
+        "accessible without authentication. Set MCP_SHIELD_API_KEY to require auth."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -130,6 +203,9 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
     Returns:
         Structured security report as a dict, including summary and all findings.
     """
+    if (e := _check_auth()) is not None:
+        return e
+
     client_id = _client_id_from_env()
 
     if not _rate_limiter.is_allowed(client_id):
@@ -160,25 +236,41 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
         # --- Fetch tool definitions from the server ---
         tool_definitions: list[dict[str, Any]] = []
         server_config: dict[str, Any] = {}
+        scan_warnings: list[str] = []
 
-        async with httpx.AsyncClient(
-            timeout=settings.max_scan_timeout,
-            headers=headers,
-            verify=False,
-        ) as client:
-            # Try to list tools via MCP initialize/tools/list flow
-            try:
-                # Attempt OpenAPI-style tools endpoint
-                resp = await client.get(f"{url}/tools")
-                if resp.status_code == 200:
-                    data = resp.json()
-                    tool_definitions = data if isinstance(data, list) else data.get("tools", [])
-            except Exception:
-                pass
+        # Try the real MCP protocol handshake (initialize + tools/list) first.
+        tool_definitions = await _fetch_tools_via_mcp(url, auth_token)
+
+        # Fall back to the legacy OpenAPI-style probe only if that yielded nothing.
+        if not tool_definitions:
+            async with httpx.AsyncClient(
+                timeout=settings.max_scan_timeout,
+                headers=headers,
+                verify=False,
+            ) as client:
+                try:
+                    resp = await client.get(f"{url}/tools")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        tool_definitions = (
+                            data if isinstance(data, list) else data.get("tools", [])
+                        )
+                except Exception:
+                    pass
+
+        if not tool_definitions:
+            scan_warnings.append(
+                "could not retrieve tool definitions from target; "
+                "tool-based checks were skipped"
+            )
 
         # --- Prompt injection scan ---
         categories.append("prompt_injection")
         inj_findings = scan_for_prompt_injection(tool_definitions) if tool_definitions else []
+
+        # --- SSRF scan ---
+        categories.append("ssrf")
+        ssrf_findings = scan_for_ssrf(tool_definitions) if tool_definitions else []
 
         # --- Credential scan ---
         categories.append("credentials")
@@ -220,6 +312,7 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
             tool_poisoning_findings=poison_findings,
             duration_ms=duration_ms,
             categories=categories,
+            ssrf_findings=ssrf_findings,
         )
         summary.scan_id = scan_id
 
@@ -230,6 +323,8 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
             endpoint_findings=ep_findings,
             tool_risk_profiles=tool_profiles,
             tool_poisoning_findings=poison_findings,
+            ssrf_findings=ssrf_findings,
+            raw_metadata={"tool_hashes": hash_tool_definitions(tool_definitions)},
         )
 
         _store_report(report)
@@ -240,10 +335,11 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
             "credential": {f.severity.value: 0 for f in cred_findings},
             "endpoint": {f.severity.value: 0 for f in ep_findings},
             "poisoning": {f.severity.value: 0 for f in poison_findings},
+            "ssrf": {f.severity.value: 0 for f in ssrf_findings},
         }
         all_cvss = [
             getattr(f, "cvss_score", 0.0)
-            for f in inj_findings + cred_findings + ep_findings + poison_findings
+            for f in inj_findings + cred_findings + ep_findings + poison_findings + ssrf_findings
         ]
         record_scan_complete(
             status="success",
@@ -266,7 +362,10 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
             overall_severity=summary.overall_severity.value,
         )
 
-        return report_to_dict(report)
+        result = report_to_dict(report)
+        if scan_warnings:
+            result["summary"]["warnings"] = scan_warnings
+        return result
 
     except Exception as e:
         record_scan_complete("failure", time.monotonic() - start_time, {}, [])
@@ -288,6 +387,9 @@ async def scan_tool_definitions(tool_json: str) -> dict[str, Any]:
     Returns:
         Dict with injection_findings, tool_risk_profiles, and summary.
     """
+    if (e := _check_auth()) is not None:
+        return e
+
     client_id = _client_id_from_env()
 
     if not _rate_limiter.is_allowed(client_id):
@@ -367,6 +469,9 @@ async def check_auth_config(config_json: str) -> dict[str, Any]:
     Returns:
         Dict with credential_findings, oauth_findings, and a risk summary.
     """
+    if (e := _check_auth()) is not None:
+        return e
+
     client_id = _client_id_from_env()
 
     if not _rate_limiter.is_allowed(client_id):
@@ -439,6 +544,9 @@ async def check_endpoint_exposure(host: str, port: int = 8000) -> dict[str, Any]
     Returns:
         Dict with endpoint_findings and open_ports.
     """
+    if (e := _check_auth()) is not None:
+        return e
+
     client_id = _client_id_from_env()
 
     if not _rate_limiter.is_allowed(client_id):
@@ -496,6 +604,9 @@ async def generate_security_report(scan_id: str, format: str = "json") -> dict[s
     Returns:
         The full report in the requested format.
     """
+    if (e := _check_auth()) is not None:
+        return e
+
     try:
         validated_id = sanitize_scan_id(scan_id)
     except ValidationError as e:
@@ -545,6 +656,9 @@ async def get_scan_history() -> dict[str, Any]:
     Returns:
         Dict with a list of scan summaries, sorted by recency.
     """
+    if (e := _check_auth()) is not None:
+        return e
+
     history = []
     for scan_id, report in reversed(list(_scan_history.items())):
         s = report.get("summary", {})
@@ -579,6 +693,9 @@ async def compare_scans(scan_id_1: str, scan_id_2: str) -> dict[str, Any]:
     Returns:
         Diff showing new findings, resolved findings, and score changes.
     """
+    if (e := _check_auth()) is not None:
+        return e
+
     try:
         id1 = sanitize_scan_id(scan_id_1)
         id2 = sanitize_scan_id(scan_id_2)
@@ -616,7 +733,18 @@ async def compare_scans(scan_id_1: str, scan_id_2: str) -> dict[str, Any]:
         new_findings.extend(f"{cat}:{r}" for r in (ids2 - ids1))
         resolved_findings.extend(f"{cat}:{r}" for r in (ids1 - ids2))
 
-    regression = cvss_delta > 0 or findings_delta > 0
+    # Rug-pull / tool-definition-change detection: compare per-tool content
+    # hashes so a silently-changed tool description is caught even if it
+    # doesn't trip any existing regex rule.
+    hashes1: dict[str, str] = scan1.get("raw_metadata", {}).get("tool_hashes", {})
+    hashes2: dict[str, str] = scan2.get("raw_metadata", {}).get("tool_hashes", {})
+    added_tools = sorted(set(hashes2) - set(hashes1))
+    removed_tools = sorted(set(hashes1) - set(hashes2))
+    changed_tools = sorted(
+        name for name in (set(hashes1) & set(hashes2)) if hashes1[name] != hashes2[name]
+    )
+
+    regression = cvss_delta > 0 or findings_delta > 0 or bool(changed_tools)
 
     return {
         "baseline_scan_id": id1,
@@ -628,6 +756,9 @@ async def compare_scans(scan_id_1: str, scan_id_2: str) -> dict[str, Any]:
         "regression_detected": regression,
         "new_findings": new_findings,
         "resolved_findings": resolved_findings,
+        "added_tools": added_tools,
+        "removed_tools": removed_tools,
+        "changed_tools": changed_tools,
         "baseline_summary": {
             "overall_cvss": r1.get("overall_cvss"),
             "critical": r1.get("critical_count"),
@@ -703,7 +834,7 @@ async def get_rules_resource() -> str:
         ],
     }
     total = sum(len(v) for v in rules.values())
-    rules["_meta"] = {"total_rules": total, "version": "0.3.0"}
+    rules["_meta"] = {"total_rules": total, "version": __version__}
     return json.dumps(rules, indent=2)
 
 
@@ -822,7 +953,7 @@ def remediation_prompt(issue_type: str) -> str:
 6. Add **content filtering** that rejects tool definitions containing injection patterns.
 
 ## Ongoing Prevention
-7. Add mcp-shield to your CI/CD pipeline to scan tool definitions on every commit.
+7. Add mcp-safeguard to your CI/CD pipeline to scan tool definitions on every commit.
 8. Review third-party MCP tools before installation — treat them like npm packages.
 9. Use `scan_tool_definitions` before deploying any tool configuration change.""",
         "credential_leak": """# Remediating Credential Exposure in MCP Configs

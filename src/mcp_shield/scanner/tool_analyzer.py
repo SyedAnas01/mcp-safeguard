@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -126,6 +128,28 @@ _POISONING_PATTERNS: list[tuple[str, Severity, str, str, float]] = [
         Severity.CRITICAL,
         "TP-008",
         "User Awareness Suppression",
+        9.5,
+    ),
+    (
+        r"(?i)<\s*(important|system|instructions?|secret|hidden|meta)\s*>",
+        Severity.CRITICAL,
+        "TP-009",
+        "Hidden Instruction Tag in Tool Description",
+        9.0,
+    ),
+    (
+        r"(?i)do\s+not\s+(mention|tell|reveal|disclose|inform|report)",
+        Severity.HIGH,
+        "TP-010",
+        "Instruction to Conceal Action from User",
+        8.0,
+    ),
+    (
+        r"(?i)read\s+.{0,80}(~/|/etc/|\.ssh|id_rsa|mcp\.json|\.env|config|secret|credential)"
+        r".{0,120}(pass|send|provide|return|include|attach).{0,40}\b(as|to|via|in)\b",
+        Severity.CRITICAL,
+        "TP-011",
+        "Read Sensitive File Then Pass As Argument",
         9.5,
     ),
 ]
@@ -299,8 +323,30 @@ def _get_poisoning_remediation(rule_id: str) -> str:
         "TP-006": "Tool descriptions must be honest. Deceptive descriptions are a security violation.",
         "TP-007": "Tools must not automatically chain invocations without explicit user intent.",
         "TP-008": "Users must always be aware of what tools are doing. Never suppress user awareness.",
+        "TP-009": "Remove hidden instruction tags (<IMPORTANT>, <SYSTEM>, etc.) from tool descriptions. Tool metadata must not carry directives to the model.",
+        "TP-010": "Tool descriptions must never instruct the AI to conceal its actions from the user.",
+        "TP-011": "Tools must never instruct the AI to read sensitive local files (SSH keys, .env, credentials) and exfiltrate their contents via tool arguments. Quarantine this tool immediately.",
     }
     return remediations.get(
         rule_id,
         "Remove this pattern from the tool description — it indicates deceptive or malicious design.",
     )
+
+
+def hash_tool_definitions(tool_definitions: list[dict[str, Any]]) -> dict[str, str]:
+    """
+    Compute a stable content hash per tool, for rug-pull / definition-change detection.
+
+    Args:
+        tool_definitions: List of MCP tool definition dicts.
+
+    Returns:
+        Dict mapping tool name (or "<unnamed>") to the sha256 hex digest of its
+        JSON representation (keys sorted for stability).
+    """
+    hashes: dict[str, str] = {}
+    for tool in tool_definitions:
+        name = tool.get("name", "<unnamed>")
+        digest = hashlib.sha256(json.dumps(tool, sort_keys=True).encode()).hexdigest()
+        hashes[name] = digest
+    return hashes

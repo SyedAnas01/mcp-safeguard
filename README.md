@@ -27,14 +27,14 @@ mcp-safeguard scan your-config.json
 
 ```bash
 pip install mcp-safeguard
-git clone https://gitlab.com/anasmohiuddinsyed/mcp-safeguard && cd mcp-safeguard
+git clone https://github.com/SyedAnas01/mcp-safeguard && cd mcp-safeguard
 mcp-safeguard scan examples/demo-vulnerable-config.json
 ```
 
 ```
 ┌─────────────────────────────────────────────────┐
 │  mcp-safeguard  —  MCP Security Scanner         │
-│  gitlab.com/anasmohiuddinsyed/mcp-safeguard            │
+│  github.com/SyedAnas01/mcp-safeguard            │
 └─────────────────────────────────────────────────┘
 
 Scanning: examples/demo-vulnerable-config.json
@@ -98,11 +98,11 @@ Four attack surfaces mcp-safeguard covers:
 
 | Risk | Rules | What it detects |
 |------|-------|----------------|
-| **Prompt Injection** | PI-001–PI-015 | Instruction overrides, jailbreak phrases, exfiltration commands, identity hijacking, zero-width steganography |
-| **Credential Leaks** | CRED-001–025 | AWS keys, Anthropic/OpenAI tokens, GitHub PATs, Stripe keys, JWTs, database URLs, hardcoded passwords |
-| **Endpoint Exposure** | EP-001–EP-013 | `/admin`, `/.env`, `/debug`, `/actuator`, AWS metadata `169.254.169.254`, dangerous open ports |
-| **Tool Poisoning** | TP-001–TP-008 | Tools with side-effect exfiltration, external URL calls, safety override instructions |
-| **SSRF Detection** | SS-001–SS-004 | URL parameters without blocklist, blind URL fetch, redirect-following without revalidation, non-HTTP schemes |
+| **Prompt Injection** | PI-001–PI-015 (15) | Instruction overrides, jailbreak phrases, exfiltration commands, identity hijacking, zero-width steganography |
+| **Credential Leaks** | CRED-001–025 (25) | AWS keys, Anthropic/OpenAI tokens, GitHub PATs, Stripe keys, JWTs, database URLs, hardcoded passwords |
+| **Endpoint Exposure** | EP-001–013, EP-PORT-001–012, EP-RESP-001–005, EP-SSRF-001 (31) | `/admin`, `/.env`, `/debug`, `/actuator`, dangerous open ports, response-body credential leaks, AWS/GCP metadata endpoints |
+| **Tool Poisoning** | TP-001–TP-011 (11) | Side-effect exfiltration, external URL calls, safety override instructions, hidden instruction tags, conceal-from-user directives, read-then-exfiltrate patterns |
+| **SSRF Detection** | SS-001–SS-003 (3) | URL parameters without allowlist/blocklist protection, blind URL fetch descriptors, redirect-following without revalidation |
 
 **v0.3.0: SSRF rules detect vulnerable URL parameter patterns across MCP fetch/scrape tools:**
 
@@ -126,7 +126,7 @@ pip install mcp-safeguard
 
 Docker:
 ```bash
-docker run -p 8000:8000 mcpshield/mcp-shield:latest
+docker run -p 8000:8000 syedanas01/mcp-safeguard:latest
 ```
 
 ---
@@ -208,7 +208,7 @@ Drop mcp-safeguard into your pipeline so MCP configs are scanned on every change
 
 ```yaml
 repos:
-  - repo: https://gitlab.com/anasmohiuddinsyed/mcp-safeguard
+  - repo: https://github.com/SyedAnas01/mcp-safeguard
     rev: v0.3.0
     hooks:
       - id: mcp-safeguard
@@ -313,15 +313,15 @@ Output:
 
 ## Detection Coverage
 
-**52 core detection rules** across four categories — prompt injection (15) + credentials (25) + tool poisoning (8) + SSRF (4) — plus 28 endpoint path probes and 12 dangerous-port checks.
+**54 core detection rules** across four categories — prompt injection (15) + credentials (25) + tool poisoning (11) + SSRF (3) — plus 29 endpoint path probes, 12 dangerous-port checks, and 5 response-body leak escalation rules.
 
 | Category | Rules | Patterns |
 |----------|-------|---------|
 | Prompt Injection | 15 rules (PI-001–015) | Instruction overrides, jailbreak, exfiltration, identity hijack, steganography |
 | Credential Leaks | 25 patterns (CRED-001–025) | AWS, Anthropic, OpenAI, GitHub, Stripe, JWT, DB URLs, generic passwords |
-| Endpoint Exposure | 28 paths + 12 ports | Admin panels, debug routes, metadata services, dev ports |
-| Tool Poisoning | 8 patterns (TP-001–008) | Side-effect exfil, external calls, safety overrides, blast radius scoring |
-| SSRF Detection | 4 rules (SS-001–004) | URL params without blocklist, blind URL fetch, redirect-following without revalidation, non-HTTP schemes |
+| Endpoint Exposure | 29 paths + 12 ports + 5 response-leak escalations | Admin panels, debug routes, metadata services, dev ports, credential leaks in response bodies |
+| Tool Poisoning | 11 patterns (TP-001–011) | Side-effect exfil, external calls, safety overrides, hidden instruction tags, conceal-from-user directives, read-then-exfiltrate patterns |
+| SSRF Detection | 3 rules (SS-001–003) | URL params without allowlist/blocklist protection, blind URL fetch descriptors, redirect-following without revalidation |
 
 ---
 
@@ -439,7 +439,7 @@ Using mcp-safeguard in your pipeline, or found a real issue with it? We welcome 
 ## Roadmap
 
 - [x] **v0.2** — Tool poisoning detection; CVSS scoring; JSON + Markdown output; batch scanning
-- [x] **v0.3** — SSRF detection module (SS-001–004); MCP server dog-fooding
+- [x] **v0.3** — SSRF detection module (SS-001–003); MCP server dog-fooding
 - [ ] **v0.4** — Scan over MCP stdio transport directly; VS Code extension; GitHub Actions plugin
 - [ ] **v0.5** — AI-assisted remediation (Claude generates fixes); SBOM for tool supply chain
 - [ ] **v1.0** — SOC2/compliance report templates; MCP registry bulk scanning
@@ -449,7 +449,7 @@ Using mcp-safeguard in your pipeline, or found a real issue with it? We welcome 
 ## Contributing
 
 ```bash
-git clone https://gitlab.com/anasmohiuddinsyed/mcp-safeguard
+git clone https://github.com/SyedAnas01/mcp-safeguard
 cd mcp-safeguard
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
@@ -475,6 +475,6 @@ MIT — see [LICENSE](LICENSE).
 
 **If this helped you, please ⭐ the repo — it helps others find it.**
 
-[GitHub](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard) · [PyPI](https://pypi.org/project/mcp-safeguard/) · [Issues](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard/issues)
+[GitHub](https://github.com/SyedAnas01/mcp-safeguard) · [PyPI](https://pypi.org/project/mcp-safeguard/) · [Issues](https://github.com/SyedAnas01/mcp-safeguard/issues)
 
 </div>

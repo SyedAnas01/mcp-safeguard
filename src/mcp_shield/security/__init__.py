@@ -1,1 +1,1 @@
-"""Security middleware and utilities for mcp-shield."""
+"""Security middleware and utilities for mcp-safeguard."""

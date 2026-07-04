@@ -12,9 +12,9 @@ OWASP classified **MCP Tool Poisoning** as an official 2026 attack category. Thi
 |-------------------|-------------------|---------------------|----------|
 | **MCP Tool Poisoning** | Tool descriptions contain embedded instructions that manipulate AI behavior | PI-001 to PI-015 (15 rules) | ✅ Full |
 | **Credential Exposure** | Sensitive credentials in server configs, tool definitions, or responses | CRED-001 to CRED-025 (25 rules) | ✅ Full |
-| **Dangerous Endpoint Exposure** | Unprotected admin, debug, or metadata endpoints | 28 path probes + PORT-001 to PORT-012 (40 checks) | ✅ Full |
-| **Privilege Escalation via Tool Scope** | Tools requesting permissions beyond stated functionality | TP-001 to TP-008 (8 rules) | ✅ Full |
-| **SSRF via MCP Server** | Server-side request forgery through MCP tool invocation | SS-001 to SS-004 (4 rules) | ✅ Full |
+| **Dangerous Endpoint Exposure** | Unprotected admin, debug, or metadata endpoints | 29 path probes + PORT-001 to PORT-012 (41 checks) | ✅ Full |
+| **Privilege Escalation via Tool Scope** | Tools requesting permissions beyond stated functionality | TP-001 to TP-011 (11 rules) | ✅ Full |
+| **SSRF via MCP Server** | Server-side request forgery through MCP tool invocation | SS-001 to SS-003 (3 rules) | ✅ Full |
 | **Supply Chain via Third-Party Tools** | Malicious tools injected via package registries | Detection roadmap | 🔄 Planned |
 
 ---

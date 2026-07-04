@@ -1,12 +1,12 @@
-# Contributing to mcp-shield
+# Contributing to mcp-safeguard
 
 Thank you for helping make MCP servers more secure!
 
 ## Development Setup
 
 ```bash
-git clone https://github.com/mcp-shield/mcp-shield
-cd mcp-shield
+git clone https://github.com/SyedAnas01/mcp-safeguard
+cd mcp-safeguard
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"

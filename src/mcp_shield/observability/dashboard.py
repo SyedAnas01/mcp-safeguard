@@ -1,5 +1,5 @@
 """
-Streamlit dashboard for mcp-shield real-time scan statistics.
+Streamlit dashboard for mcp-safeguard real-time scan statistics.
 
 Run with: streamlit run src/mcp_shield/observability/dashboard.py
 """
@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+from mcp_shield import __version__
+
 
 def main() -> None:
     """Launch the Streamlit dashboard."""
@@ -21,12 +23,12 @@ def main() -> None:
         sys.exit(1)
 
     st.set_page_config(
-        page_title="mcp-shield Dashboard",
+        page_title="mcp-safeguard Dashboard",
         page_icon="🛡️",
         layout="wide",
     )
 
-    st.title("🛡️ mcp-shield — Security Dashboard")
+    st.title("🛡️ mcp-safeguard — Security Dashboard")
     st.caption("Real-time MCP server security scan statistics")
 
     # Load scan history from report directory
@@ -94,7 +96,7 @@ def main() -> None:
 
     st.bar_chart(severity_counts)
 
-    st.caption(f"mcp-safeguard v0.3.0 | Reports from: {report_dir}")
+    st.caption(f"mcp-safeguard v{__version__} | Reports from: {report_dir}")
 
 
 if __name__ == "__main__":

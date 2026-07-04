@@ -184,7 +184,7 @@ With `--fail-on-high`, CI fails on CRITICAL and HIGH. MEDIUM, LOW, and INFO find
 
 ## Resources
 
-- GitHub: [gitlab.com/anasmohiuddinsyed/mcp-safeguard](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard)
+- GitHub: [github.com/SyedAnas01/mcp-safeguard](https://github.com/SyedAnas01/mcp-safeguard)
 - PyPI: [pypi.org/project/mcp-safeguard](https://pypi.org/project/mcp-safeguard)
 - Full CLI reference: `mcp-safeguard --help`
 - Report a false positive: open an issue with the `false-positive` label
