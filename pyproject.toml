@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-safeguard"
-version = "0.3.0"
+version = "0.3.2"
 description = "Security scanner for MCP servers — detect prompt injection, credential leaks, exposed endpoints, and tool poisoning"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "mcp-shield contributors" }]
+authors = [{ name = "Syed Anas Mohiuddin", email = "anasmohiuddinsyed@gmail.com" }]
+maintainers = [{ name = "Syed Anas Mohiuddin", email = "anasmohiuddinsyed@gmail.com" }]
 keywords = [
     "mcp",
     "security",
@@ -60,15 +61,18 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/SyedAnas01/mcp-safeguard"
-Repository = "https://github.com/SyedAnas01/mcp-safeguard"
-"Bug Tracker" = "https://github.com/SyedAnas01/mcp-safeguard/issues"
-Documentation = "https://github.com/SyedAnas01/mcp-safeguard#readme"
-Changelog = "https://github.com/SyedAnas01/mcp-safeguard/blob/main/CHANGELOG.md"
+Homepage = "https://gitlab.com/anasmohiuddinsyed/mcp-safeguard"
+Repository = "https://gitlab.com/anasmohiuddinsyed/mcp-safeguard"
+"Bug Tracker" = "https://gitlab.com/anasmohiuddinsyed/mcp-safeguard/issues"
+Documentation = "https://gitlab.com/anasmohiuddinsyed/mcp-safeguard#readme"
+Changelog = "https://gitlab.com/anasmohiuddinsyed/mcp-safeguard/blob/main/CHANGELOG.md"
 
 [project.scripts]
 mcp-safeguard = "mcp_shield.cli:main"
 mcp-shield = "mcp_shield.server:mcp.run"
+
+[tool.setuptools]
+license-files = []
 
 [tool.setuptools.packages.find]
 where = ["src"]

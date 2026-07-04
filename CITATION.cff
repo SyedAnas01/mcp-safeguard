@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "mcp-safeguard: An Automated Security Scanner for Model Context Protocol (MCP) Servers"
+abstract: >-
+  mcp-safeguard is an open-source security scanner purpose-built for the Model
+  Context Protocol (MCP) ecosystem. It detects Server-Side Request Forgery (SSRF),
+  credential exposure, prompt injection, tool poisoning, and security
+  misconfigurations across MCP server implementations.
+type: software
+authors:
+  - family-names: Mohiuddin
+    given-names: Syed Anas
+    orcid: "https://orcid.org/0009-0005-3736-6430"
+    email: anasmohiuddinsyed@gmail.com
+version: "0.3.1"
+date-released: "2026-05-23"
+license: MIT
+keywords:
+  - MCP
+  - model-context-protocol
+  - security
+  - SSRF
+  - prompt-injection
+  - credential-exposure
+  - AI-security
+  - LLM-security
+url: "https://pypi.org/project/mcp-safeguard/"
+# repository-code: set to the GitLab URL once the canonical repo is live
+# identifiers: add the Zenodo software DOI once minted
