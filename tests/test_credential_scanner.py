@@ -109,3 +109,56 @@ def test_delete_scope_high():
 
 def test_empty_scopes_no_findings():
     assert scan_oauth_scopes([]) == []
+
+
+# Tests for new credential rules (CRED-027, CRED-028)
+
+
+def test_detects_replicate_api_token():
+    config = {"env": {"REPLICATE_API_TOKEN": "r8_" + "A" * 37}}
+    findings = scan_for_credentials(config)
+    rule_ids = [f.rule_id for f in findings]
+    assert any("CRED-027" in r for r in rule_ids)
+
+
+def test_detects_replicate_token_in_config():
+    config = {"tool": {"api_key": "r8_" + "Xy" * 18 + "Z"}}
+    findings = scan_for_credentials(config)
+    rule_ids = [f.rule_id for f in findings]
+    assert any("CRED-027" in r for r in rule_ids)
+
+
+def test_clean_config_no_replicate_false_positive():
+    config = {"env": {"MODEL_ID": "owner/model:abcdef"}}
+    findings = scan_for_credentials(config)
+    rule_ids = [f.rule_id for f in findings]
+    assert not any("CRED-027" in r for r in rule_ids)
+
+
+def test_detects_cohere_api_key_by_value():
+    config = {"env": {"MY_KEY": 'cohere_api_key="' + "a" * 40 + '"'}}
+    findings = scan_for_credentials(config)
+    rule_ids = [f.rule_id for f in findings]
+    assert any("CRED-028" in r for r in rule_ids)
+
+
+def test_detects_cohere_credential_env_name():
+    config = {"env": {"COHERE_API_KEY": "draft-key-not-a-real-secret-xxx"}}
+    findings = scan_for_credentials(config)
+    rule_ids = [f.rule_id for f in findings]
+    assert any("CRED-028" in r for r in rule_ids)
+
+
+def test_clean_config_no_cohere_false_positive():
+    config = {"env": {"COHERE_BASE_URL": "https://api.cohere.ai/v1"}}
+    findings = scan_for_credentials(config)
+    rule_ids = [f.rule_id for f in findings]
+    assert not any("CRED-028" in r for r in rule_ids)
+
+
+def test_new_rules_have_remediation():
+    config = {"env": {"REPLICATE_API_TOKEN": "r8_" + "A" * 37}}
+    findings = scan_for_credentials(config)
+    for f in findings:
+        if "CRED-027" in f.rule_id or "CRED-028" in f.rule_id:
+            assert f.remediation, "New credential rules must have remediation text"
