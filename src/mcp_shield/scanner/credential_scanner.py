@@ -164,6 +164,22 @@ _CREDENTIAL_PATTERNS: list[tuple[str, Severity, str, str, float]] = [
         "Hugging Face API Token",
         8.0,
     ),
+    # Replicate API tokens
+    (
+        r"r8_[A-Za-z0-9]{37}",
+        Severity.HIGH,
+        "CRED-027",
+        "Replicate API Token",
+        8.5,
+    ),
+    # Cohere API keys
+    (
+        r"(?i)cohere[_\-]?(api[_\-]?)?(key|token)\s*[=:]\s*[\\]?[\"'][A-Za-z0-9]{40}[\\]?[\"']",
+        Severity.HIGH,
+        "CRED-028",
+        "Cohere API Key",
+        8.0,
+    ),
 ]
 
 # OAuth scope risk rules: (scope_pattern, severity, rule_id, title, cvss_score)
@@ -275,6 +291,8 @@ def scan_for_credentials(config: dict[str, Any]) -> list[CredentialFinding]:
         (r"(?i)(github.*(token|pat|key)|gh_token|github_token)", "CRED-024", "GitHub Credential in Environment", 8.0),
         (r"(?i)(aws.*(access.*key|secret.*key)|aws_access_key_id|aws_secret)", "CRED-025", "AWS Credential in Environment", 9.5),
         (r"(?i)(huggingface|hugging_face|hf).*token|hf_token", "CRED-026", "Hugging Face Credential in Environment", 8.0),
+        (r"(?i)(replicate.*(token|key|api))", "CRED-027", "Replicate Credential in Environment", 8.5),
+        (r"(?i)(cohere.*(key|token|api))", "CRED-028", "Cohere Credential in Environment", 8.0),
     ]
 
     for key, value in env_vars.items():
@@ -381,6 +399,8 @@ def _get_cred_remediation(rule_id: str) -> str:
         "CRED-016": "Rotate this OpenAI API key. Use project-scoped keys with spending limits.",
         "CRED-017": "Rotate this Anthropic API key. Use workspace-scoped keys.",
         "CRED-026": "Rotate this Hugging Face token. Use fine-grained tokens with the minimum required permissions.",
+        "CRED-027": "Rotate this Replicate API token. Use scoped tokens with spending limits.",
+        "CRED-028": "Rotate this Cohere API key. Use environment-specific keys with rate limits.",
     }
     return remediations.get(base, "Rotate the credential and move to a secrets manager.")
 

@@ -46,6 +46,10 @@ All notable changes to mcp-safeguard are documented here.
 - CLI: `mcp-safeguard scan --target <path>`
 
 ## [Unreleased] - Coming in 0.4.0
+- **New credential detection rules**:
+  - `CRED-027`: Replicate API token detection (`r8_` prefix pattern, CVSS 8.5 HIGH)
+  - `CRED-028`: Cohere API key detection (CVSS 8.0 HIGH)
+  - Env var name detection for Replicate and Cohere credentials
 - Scan over MCP stdio transport directly
 - GitHub Actions workflow template
 - VS Code extension for real-time MCP security hints
