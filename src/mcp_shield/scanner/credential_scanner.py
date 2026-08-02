@@ -156,6 +156,14 @@ _CREDENTIAL_PATTERNS: list[tuple[str, Severity, str, str, float]] = [
         "Anthropic API Key",
         9.5,
     ),
+    # Hugging Face tokens
+    (
+        r"hf_[A-Za-z0-9]{34}",
+        Severity.HIGH,
+        "CRED-026",
+        "Hugging Face API Token",
+        8.0,
+    ),
 ]
 
 # OAuth scope risk rules: (scope_pattern, severity, rule_id, title, cvss_score)
@@ -266,6 +274,7 @@ def scan_for_credentials(config: dict[str, Any]) -> list[CredentialFinding]:
         (r"(?i)(slack.*(token|secret|webhook)|slack_bot_token)", "CRED-023", "Slack Credential in Environment", 7.5),
         (r"(?i)(github.*(token|pat|key)|gh_token|github_token)", "CRED-024", "GitHub Credential in Environment", 8.0),
         (r"(?i)(aws.*(access.*key|secret.*key)|aws_access_key_id|aws_secret)", "CRED-025", "AWS Credential in Environment", 9.5),
+        (r"(?i)(huggingface|hugging_face|hf).*token|hf_token", "CRED-026", "Hugging Face Credential in Environment", 8.0),
     ]
 
     for key, value in env_vars.items():
@@ -371,6 +380,7 @@ def _get_cred_remediation(rule_id: str) -> str:
         "CRED-015": "Rotate Stripe keys immediately. Use restricted keys with minimum permissions.",
         "CRED-016": "Rotate this OpenAI API key. Use project-scoped keys with spending limits.",
         "CRED-017": "Rotate this Anthropic API key. Use workspace-scoped keys.",
+        "CRED-026": "Rotate this Hugging Face token. Use fine-grained tokens with the minimum required permissions.",
     }
     return remediations.get(base, "Rotate the credential and move to a secrets manager.")
 
