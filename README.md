@@ -7,7 +7,10 @@
 
 Detect prompt injection · credential leaks · exposed endpoints · tool poisoning
 
+> 🔎 **Found [CVE-2026-14540](https://github.com/googleapis/genai-toolbox/pull/3448) — a server-side request forgery in Google's official MCP Toolbox. Google shipped the fix and credited the report.**
+
 [![PyPI version](https://badge.fury.io/py/mcp-safeguard.svg)](https://pypi.org/project/mcp-safeguard/)
+[![Found CVE-2026-14540 in Google's MCP Toolbox](https://img.shields.io/badge/found-CVE--2026--14540-critical)](https://github.com/googleapis/genai-toolbox/pull/3448)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20502474.svg)](https://doi.org/10.5281/zenodo.20502474)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
