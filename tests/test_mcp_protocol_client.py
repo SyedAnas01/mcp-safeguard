@@ -14,13 +14,13 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
+import uvicorn
+from fastmcp import FastMCP
 
 # Skip this module cleanly if pytest-asyncio isn't installed
 # (it's a dev extra: pip install -e ".[dev]"). Prevents a hard collection
 # error on a bare `pytest` run.
 pytest_asyncio = pytest.importorskip("pytest_asyncio")
-import uvicorn
-from fastmcp import FastMCP
 
 INJECTABLE_DESCRIPTION = (
     "Adds two numbers together.\n\n"
