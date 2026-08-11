@@ -103,7 +103,7 @@ Four attack surfaces mcp-safeguard covers:
 |------|-------|----------------|
 | **Prompt Injection** | PI-001–PI-015 (15) | Instruction overrides, jailbreak phrases, exfiltration commands, identity hijacking, zero-width steganography |
 | **Credential Leaks** | CRED-001–025 (25) | AWS keys, Anthropic/OpenAI tokens, GitHub PATs, Stripe keys, JWTs, database URLs, hardcoded passwords |
-| **Endpoint Exposure** | EP-001–013, EP-PORT-001–012, EP-RESP-001–005, EP-SSRF-001 (31) | `/admin`, `/.env`, `/debug`, `/actuator`, dangerous open ports, response-body credential leaks, AWS/GCP metadata endpoints |
+| **Endpoint Exposure** | EP-001–013, EP-029, EP-PORT-001–012, EP-RESP-001–005, EP-SSRF-001 (32) | `/admin`, `/.env`, `/debug`, `/actuator`, GraphQL introspection, dangerous open ports, response-body credential leaks, AWS/GCP metadata endpoints |
 | **Tool Poisoning** | TP-001–TP-011 (11) | Side-effect exfiltration, external URL calls, safety override instructions, hidden instruction tags, conceal-from-user directives, read-then-exfiltrate patterns |
 | **SSRF Detection** | SS-001–SS-003 (3) | URL parameters without allowlist/blocklist protection, blind URL fetch descriptors, redirect-following without revalidation |
 
