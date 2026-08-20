@@ -156,6 +156,32 @@ for f in findings:
     print(f"[{f.severity}] {f.title}: {f.evidence}")
 ```
 
+### Scan a server's source tree
+
+The scanners above read a config/tool-definition JSON. `scan-source` instead
+walks an MCP server's actual implementation for code-level footguns a config
+scan cannot see: credential handling across redirects, SQL read-only
+enforcement, and a server-held credential attached to a caller-influenced
+destination host.
+
+```bash
+mcp-safeguard scan-source ./path/to/mcp-server-repo
+mcp-safeguard scan-source . --severity HIGH --fail-on HIGH
+```
+
+| Rule | Detects |
+|------|---------|
+| SRC-001 | Go `http.RoundTripper` re-applies `Authorization` on every hop with no `CheckRedirect` to strip it on a host change |
+| SRC-002 | Python `httpx` client with `follow_redirects=True` plus a bearer/Authorization header (the same failure as SRC-001) |
+| SRC-003 | SQL read-only mode enforced by a string/prefix check only, with no database-level read-only transaction in the same file |
+| SRC-004 | A server-held credential (token/secret/API key) attached to a connection whose destination host is an interpolated, potentially caller-influenced variable |
+
+This mode is heuristic (regex over source text, not a type-aware analysis):
+findings are leads to confirm by reading the cited file and line, not proofs.
+It was validated against the published source of 14 official vendor MCP
+servers (Microsoft, Amazon, Google, GitHub, and others), correctly
+identifying the target pattern in 9 of 10 known instances.
+
 ### Connect to Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
@@ -316,7 +342,7 @@ Output:
 
 ## Detection Coverage
 
-**54 core detection rules** across four categories — prompt injection (15) + credentials (25) + tool poisoning (11) + SSRF (3) — plus 29 endpoint path probes, 12 dangerous-port checks, and 5 response-body leak escalation rules.
+**58 core detection rules** across five categories — prompt injection (15) + credentials (25) + tool poisoning (11) + SSRF (3) + source-audit (4) — plus 29 endpoint path probes, 12 dangerous-port checks, and 5 response-body leak escalation rules.
 
 | Category | Rules | Patterns |
 |----------|-------|---------|
@@ -325,6 +351,7 @@ Output:
 | Endpoint Exposure | 29 paths + 12 ports + 5 response-leak escalations | Admin panels, debug routes, metadata services, dev ports, credential leaks in response bodies |
 | Tool Poisoning | 11 patterns (TP-001–011) | Side-effect exfil, external calls, safety overrides, hidden instruction tags, conceal-from-user directives, read-then-exfiltrate patterns |
 | SSRF Detection | 3 rules (SS-001–003) | URL params without allowlist/blocklist protection, blind URL fetch descriptors, redirect-following without revalidation |
+| Source Audit | 4 rules (SRC-001–004) | Credential re-applied across a cross-host redirect (Go and Python), read-only enforced by string check alone, credential attached to a caller-influenced destination host. Scans the server's source tree, not a config file — see `scan-source` above |
 
 ---
 

@@ -2,6 +2,22 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.4.0] - 2026-08-20
+### Added
+- **Source-audit mode** (`source_scanner.py`) and new `scan-source` CLI command: 4 new
+  rules that scan a server's actual source tree, not a config/tool-definition JSON.
+  - `SRC-001` — Go `http.RoundTripper` re-applies `Authorization` on every hop with no
+    `CheckRedirect` to strip it on a cross-host redirect (CVSS 6.5 MEDIUM)
+  - `SRC-002` — Python `httpx` client with `follow_redirects=True` plus a bearer/
+    Authorization header, the same failure as SRC-001 (CVSS 6.5 MEDIUM)
+  - `SRC-003` — SQL read-only mode enforced by a string/prefix check only, with no
+    database-level read-only transaction in the same file (CVSS 7.5 HIGH)
+  - `SRC-004` — A server-held credential attached to a connection whose destination
+    host is an interpolated, potentially caller-influenced variable (CVSS 7.5 HIGH)
+- Validated against the published source of 14 official vendor MCP servers (Microsoft,
+  Amazon, Google, GitHub, and others): 9 of 10 known instances correctly identified,
+  zero findings on the 9 clean repositories in the same corpus.
+
 ## [0.3.0] - 2026-05-22
 ### Added
 - **SSRF detection module** (`ssrf_scanner.py`): 4 new rules for Server-Side Request Forgery

@@ -240,6 +240,75 @@ def _exit_code(findings: list[dict], fail_on: str | None) -> int:
     return 0
 
 
+def _run_source_scan(root_path: str, min_severity: str = "INFO",
+                      fail_on: str | None = None, output: str | None = None,
+                      fmt: str = "text") -> int:
+    """Walk a source tree and run the code-level heuristic rules. Returns exit code."""
+    from pathlib import Path as _Path
+
+    from mcp_shield.scanner.source_scanner import scan_source_tree
+
+    root = _Path(root_path)
+    if not root.is_dir():
+        print(f"Error: not a directory: {root_path}", file=sys.stderr)
+        sys.exit(1)
+
+    _print_banner()
+    print(f"Source-scanning: {_color(root_path, _BOLD)}")
+    print("─" * 60)
+
+    findings = scan_source_tree(root)
+    all_findings = [
+        {
+            "rule_id": f.rule_id,
+            "severity": f.severity.value,
+            "title": f.title,
+            "location": f.location,
+            "evidence": f.evidence,
+            "remediation": f.remediation,
+            "cvss": f.cvss_score,
+            "category": "source-audit",
+        }
+        for f in findings
+    ]
+
+    min_val = _severity_value(min_severity)
+    filtered = [f for f in all_findings if _severity_value(f["severity"]) <= min_val]
+    filtered.sort(key=lambda x: (_severity_value(x["severity"]), -x["cvss"]))
+
+    if fmt == "json":
+        print(json.dumps(filtered, indent=2))
+        return _exit_code(filtered, fail_on)
+
+    if not filtered:
+        print(_color("  ✓ No source-level findings above threshold.", _GREEN))
+    else:
+        for f in filtered:
+            _print_finding(
+                f["rule_id"], f["severity"], f["title"],
+                f["location"], f["evidence"], f["remediation"], f["cvss"]
+            )
+
+    counts: dict[str, int] = {}
+    for f in filtered:
+        counts[f["severity"]] = counts.get(f["severity"], 0) + 1
+
+    print("─" * 60)
+    total = len(filtered)
+    summary_parts = []
+    for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
+        if sev in counts:
+            color = _SEVERITY_COLOR[sev]
+            summary_parts.append(_color(f"{counts[sev]} {sev}", color + _BOLD))
+    summary = ", ".join(summary_parts) if summary_parts else _color("0 findings", _GREEN)
+    print(f"{_color(str(total), _BOLD)} finding{'s' if total != 1 else ''}: {summary}")
+
+    if output:
+        _write_output(filtered, output, root_path)
+
+    return _exit_code(filtered, fail_on)
+
+
 def _write_output(findings: list[dict], output: str, scanned: str) -> None:
     """Write findings to a file (HTML or JSON based on extension)."""
     p = Path(output)
@@ -283,6 +352,7 @@ def _print_help() -> None:
 
         USAGE:
             mcp-safeguard scan <config.json> [OPTIONS]
+            mcp-safeguard scan-source <repo-dir> [OPTIONS]
 
         OPTIONS:
             --severity <LEVEL>   Minimum severity to show: CRITICAL, HIGH, MEDIUM, LOW, INFO (default: INFO)
@@ -296,8 +366,16 @@ def _print_help() -> None:
             mcp-safeguard scan config.json --fail-on CRITICAL
             mcp-safeguard scan config.json --output report.html
             mcp-safeguard scan examples/demo-vulnerable-config.json
+            mcp-safeguard scan-source ./path/to/mcp-server-repo
 
         Config format: Claude Desktop mcpServers JSON or {tools: [...], env: {...}}
+
+        `scan` reads a config/tool-definition JSON. `scan-source` walks a
+        server's actual source tree for code-level footguns a config scan
+        cannot see (SRC-001..SRC-004: credential handling across redirects,
+        SQL read-only enforcement, and caller-influenced credential
+        destinations). Source-audit findings are heuristic leads to confirm
+        by reading the cited file/line, not proofs.
 
         GitHub: https://github.com/SyedAnas01/mcp-safeguard
     """))
@@ -339,6 +417,37 @@ def main() -> None:
                 i += 1
 
         code = _run_scan(config_path, severity, fail_on, output, fmt)
+        sys.exit(code)
+
+    elif args[0] == "scan-source":
+        if len(args) < 2:
+            print("Error: missing target directory. Usage: mcp-safeguard scan-source <path>", file=sys.stderr)
+            sys.exit(1)
+        root_path = args[1]
+        severity = "INFO"
+        fail_on = None
+        output = None
+        fmt = "text"
+
+        i = 2
+        while i < len(args):
+            if args[i] == "--severity" and i + 1 < len(args):
+                severity = args[i + 1].upper()
+                i += 2
+            elif args[i] == "--fail-on" and i + 1 < len(args):
+                fail_on = args[i + 1].upper()
+                i += 2
+            elif args[i] == "--output" and i + 1 < len(args):
+                output = args[i + 1]
+                i += 2
+            elif args[i] == "--format" and i + 1 < len(args):
+                fmt = args[i + 1].lower()
+                i += 2
+            else:
+                print(f"Warning: unknown option {args[i]}", file=sys.stderr)
+                i += 1
+
+        code = _run_source_scan(root_path, severity, fail_on, output, fmt)
         sys.exit(code)
 
     elif args[0] == "version":
