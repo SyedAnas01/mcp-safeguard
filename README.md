@@ -161,8 +161,12 @@ for f in findings:
 The scanners above read a config/tool-definition JSON. `scan-source` instead
 walks an MCP server's actual implementation for code-level footguns a config
 scan cannot see: credential handling across redirects, SQL read-only
-enforcement, and a server-held credential attached to a caller-influenced
-destination host.
+enforcement, a server-held credential attached to a caller-influenced
+destination host, unenforced auth flags, unowned resource IDs keying shared
+state, syntax-only destructive-query classifiers trusted as security gates,
+client-trusted ownership fields on mutations, unescaped shell interpolation,
+unhardened credential file writes, SSRF DNS-rebinding TOCTOU windows, and
+silently-dropped manifest entries.
 
 ```bash
 mcp-safeguard scan-source ./path/to/mcp-server-repo
@@ -175,9 +179,26 @@ mcp-safeguard scan-source . --severity HIGH --fail-on HIGH
 | SRC-002 | Python `httpx` client with `follow_redirects=True` plus a bearer/Authorization header (the same failure as SRC-001) |
 | SRC-003 | SQL read-only mode enforced by a string/prefix check only, with no database-level read-only transaction in the same file |
 | SRC-004 | A server-held credential (token/secret/API key) attached to a connection whose destination host is an interpolated, potentially caller-influenced variable |
+| SRC-005 | An `--auth-token`/`AUTH_TOKEN` flag is parsed and referenced but never actually gates the network listener before it starts serving |
+| SRC-006 | A client-supplied resource ID (`chat_id`/`session_id`/...) keys shared server-side state with no ownership check on that ID |
+| SRC-007 | A "detect destructive"/`is_readonly`-style classifier used to gate execution recognizes only statement-type syntax, missing side-effecting calls wrapped in a safe-looking statement |
+| SRC-008 | A create/update mutation trusts a client-supplied ownership field (`user_id`/`owner_id`/`account_id`/`tenant_id`) instead of deriving it server-side |
+| SRC-009 | Unescaped interpolation into a shell string passed to `exec`/`system`, where the same repo already has a safer argv/quoting pattern elsewhere |
+| SRC-010 | A credential/key file is written with no permission hardening, while the same repo hardens permissions on other file writes |
+| SRC-011 | An SSRF guard validates a resolved IP once, but the actual outbound call re-resolves the original URL string (DNS-rebinding TOCTOU) |
+| SRC-012 | A manifest/lockfile parser silently drops sentinel-valued entries with only debug-level logging before the list reaches a security consumer |
 
-This mode is heuristic (regex over source text, not a type-aware analysis):
-findings are leads to confirm by reading the cited file and line, not proofs.
+This mode is heuristic (regex/text-proximity over source, not a type-aware or
+dataflow analysis): findings are leads to confirm by reading the cited file and
+line, not proofs. SRC-009 and SRC-010 deliberately fire only when the same repo
+shows it already knows the safer pattern elsewhere, trading recall for a lower
+false-positive rate. SRC-007 requires evidence the classifier's result actually
+gates execution somewhere, not just that a safety-named function exists — a
+direct guard against conflating "a classifier exists" with "the classifier is
+enforced," which is the most common way this class of tool overclaims. SRC-006
+and SRC-008's ownership/derivation checks are file-scoped, so a check enforced
+in shared middleware elsewhere in the repo won't be seen and can read as a
+finding here — treat those two as the least reliable of the eight.
 It was validated against the published source of 14 official vendor MCP
 servers (Microsoft, Amazon, Google, GitHub, and others), correctly
 identifying the target pattern in 9 of 10 known instances.
@@ -342,7 +363,7 @@ Output:
 
 ## Detection Coverage
 
-**58 core detection rules** across five categories — prompt injection (15) + credentials (25) + tool poisoning (11) + SSRF (3) + source-audit (4) — plus 29 endpoint path probes, 12 dangerous-port checks, and 5 response-body leak escalation rules.
+**66 core detection rules** across five categories — prompt injection (15) + credentials (25) + tool poisoning (11) + SSRF (3) + source-audit (12) — plus 29 endpoint path probes, 12 dangerous-port checks, and 5 response-body leak escalation rules.
 
 | Category | Rules | Patterns |
 |----------|-------|---------|
@@ -351,7 +372,7 @@ Output:
 | Endpoint Exposure | 29 paths + 12 ports + 5 response-leak escalations | Admin panels, debug routes, metadata services, dev ports, credential leaks in response bodies |
 | Tool Poisoning | 11 patterns (TP-001–011) | Side-effect exfil, external calls, safety overrides, hidden instruction tags, conceal-from-user directives, read-then-exfiltrate patterns |
 | SSRF Detection | 3 rules (SS-001–003) | URL params without allowlist/blocklist protection, blind URL fetch descriptors, redirect-following without revalidation |
-| Source Audit | 4 rules (SRC-001–004) | Credential re-applied across a cross-host redirect (Go and Python), read-only enforced by string check alone, credential attached to a caller-influenced destination host. Scans the server's source tree, not a config file — see `scan-source` above |
+| Source Audit | 12 rules (SRC-001–012) | Credential re-applied across a cross-host redirect (Go and Python), read-only enforced by string check alone, credential attached to a caller-influenced destination host, unenforced auth flags, unowned resource IDs keying shared state, syntax-only destructive-query classifiers, client-trusted ownership fields, unescaped shell interpolation, unhardened credential file writes, SSRF TOCTOU, and silently-dropped manifest entries. Scans the server's source tree, not a config file — see `scan-source` above |
 
 ---
 
