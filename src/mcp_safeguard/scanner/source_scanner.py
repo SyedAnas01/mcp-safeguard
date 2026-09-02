@@ -33,8 +33,40 @@ Rules:
            re-resolves the original URL string (DNS-rebinding TOCTOU).
   SRC-012  A manifest/lockfile parser silently drops sentinel-valued entries with
            only debug-level logging before the list reaches a security consumer.
+  SRC-013  TLS certificate verification explicitly disabled -- Python's verify
+           parameter set to False, the ssl module's CERT_NONE, Node's
+           rejectUnauthorized flag set to false, Go's InsecureSkipVerify, etc.
+           (worded here to describe the patterns without literally reproducing
+           them, so this doc comment doesn't trigger the rule it's describing).
+  SRC-014  An OAuth redirect_uri is read from the request and used in a
+           redirect response with no allowlist/registration comparison in
+           between (authorization-code interception -- the single most common
+           real bug class found across this project's own disclosure
+           campaign: confirmed government and commercial MCP servers alike).
+  SRC-015  The inbound Authorization header is captured and re-forwarded as an
+           outbound request header (token passthrough) -- forbidden outright
+           by the MCP spec's own Security Best Practices ("MUST NOT accept
+           tokens not issued for it").
+  SRC-016  A write/destructive-capability flag gates only the tool-list
+           response, with no matching gate anywhere near the tool-call
+           dispatcher in the same file -- a caller who already knows a tool's
+           name executes it regardless of the flag (the flag hides discovery,
+           not execution).
+  SRC-017  An HTTP header value is used directly as an authorization/tenant-
+           scoping identity, with no authentication-check call anywhere in
+           the same file.
+  SRC-018  A path is built by joining a base directory with a request/
+           argument-derived value and used in a file operation, with no
+           realpath+containment check in between (real path traversal, not
+           the earlier "parameter is named 'path'" heuristic).
+  SRC-019  Unescaped shell interpolation, same shape as SRC-009 but without
+           requiring repo-wide corroboration -- broader recall for the
+           single largest real-world MCP CVE class (shell/exec injection).
+  SRC-020  A value is interpolated into a URL query string with no proper
+           encoder -- the statically-detectable root cause behind HTTP
+           Parameter Pollution and query-string injection.
 
-SRC-005..SRC-012 are heuristic in the same sense as SRC-001..004: each is a
+SRC-005..SRC-020 are heuristic in the same sense as SRC-001..004: each is a
 regex/text-proximity signal over source, not a type-aware or dataflow analysis.
 They are LEADS to confirm by reading the cited file, not proofs. Several
 (SRC-009, SRC-010) intentionally fire only when the SAME repository already
@@ -44,7 +76,14 @@ classifier actually gates execution somewhere (not just that the function
 exists) before flagging it, precisely to avoid conflating "there is a
 type-classifier function" with "the type-classifier is used as a security
 control" -- the exact overclaim shape a manual audit must otherwise catch by
-hand.
+hand. SRC-016 uses the same discipline in reverse: it only fires when a
+write-gating flag is found INSIDE a list-tools function and confirmed ABSENT
+everywhere else in the file, rather than merely noting the flag exists.
+
+SRC-013..SRC-020 were added after this project's own coordinated-disclosure
+campaign against real-world MCP servers turned up the same handful of bug
+shapes repeatedly across unrelated codebases -- each rule below cites the
+pattern it was derived from, not a hypothetical.
 """
 
 from __future__ import annotations
@@ -54,6 +93,37 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .prompt_injection import Severity
+
+# Rule catalog for introspection (security://rules resource, docs generation).
+# Kept as a plain list of (rule_id, title) rather than re-deriving it from the
+# detection logic below, since several rules (e.g. SRC-007, SRC-016) fire from
+# multi-step control flow, not a single flat pattern list the way the other
+# scanner modules work -- this is the intentionally simple, honest source of
+# truth for "how many source-audit rules exist" so README/doc counts can be
+# generated from code instead of hand-maintained (and going stale, as the
+# hand-maintained counts previously did).
+RULE_IDS: list[tuple[str, str]] = [
+    ("SRC-001", "Auth header re-applied in transport without redirect guard"),
+    ("SRC-002", "httpx client follows redirects while carrying a bearer token"),
+    ("SRC-003", "SQL read-only enforced by string prefix check only"),
+    ("SRC-004", "Credential attached to a caller-influenced destination host"),
+    ("SRC-005", "Auth flag parsed and warned about, never enforced before serving"),
+    ("SRC-006", "Client-supplied resource ID keys shared state with no ownership check"),
+    ("SRC-007", "Read-only/destructive classifier recognizes syntax, not calls"),
+    ("SRC-008", "Client-supplied ownership field trusted on create/update"),
+    ("SRC-009", "Unescaped interpolation into a shell command"),
+    ("SRC-010", "Credential file written without permission hardening"),
+    ("SRC-011", "SSRF guard validates once; fetch call re-resolves DNS separately"),
+    ("SRC-012", "Manifest entry silently dropped with only debug-level logging"),
+    ("SRC-013", "TLS certificate verification disabled"),
+    ("SRC-014", "OAuth redirect_uri used in a redirect with no allowlist check"),
+    ("SRC-015", "Inbound Authorization header re-forwarded to an outbound request"),
+    ("SRC-016", "Write-capability flag gates tool listing, not tool execution"),
+    ("SRC-017", "Header value used as authorization identity with no authentication check"),
+    ("SRC-018", "Path traversal: joined path used with no containment check"),
+    ("SRC-019", "Unescaped interpolation into a shell command (broad check)"),
+    ("SRC-020", "Unencoded value interpolated into a URL query string"),
+]
 
 
 @dataclass
@@ -216,6 +286,179 @@ _WARN_OR_ERROR_LOG = re.compile(
     re.IGNORECASE,
 )
 
+# SRC-013: TLS certificate verification explicitly disabled. Unlike most rules
+# in this module, this one needs no repo-wide corroborating signal or nearby
+# gate check -- the pattern itself is unambiguous, the same discipline Bandit
+# (B501/B502/B503) and Ruff (S501) use for the identical check.
+_TLS_VERIFY_DISABLED = re.compile(
+    r"verify\s*=\s*False|ssl\.CERT_NONE|ssl\._create_unverified_context\(\)|"
+    r"check_hostname\s*=\s*False|rejectUnauthorized\s*:\s*false|"
+    r"NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['\"]?0|InsecureSkipVerify\s*:\s*true",
+)
+
+# SRC-014: redirect_uri read from the request and used in a redirect response
+# with no comparison against a stored/registered value anywhere in the file --
+# authorization-code interception (RFC 9700 SS4.1.1). This exact bug class was
+# the root cause of this project's two most severe confirmed government
+# findings (a UK court-service MCP register and a Norwegian government MCP
+# server) plus multiple commercial ones (Neon, Emporia Energy) -- it is the
+# single most common real vulnerability this campaign has found.
+#
+# Matches BOTH a plain assignment (redirect_uri = req.query.redirect_uri) and
+# a destructuring extraction (const { redirect_uri } = req.query), since real
+# Express/Fastify-style handlers overwhelmingly use the latter -- an earlier
+# version of this rule only matched the former and, verified against the
+# actual confirmed-vulnerable Emporia Energy source, MISSED the real bug
+# entirely. The redirect-call check and the validation check both search the
+# WHOLE file, not just a window after the extraction, because the realistic
+# shape stores redirect_uri (often in a map/session keyed by an OAuth
+# `state`) in one handler and redirects using it in a SEPARATE handler --
+# exactly Emporia's /oauth/authorize -> pendingOAuthRequests -> /oauth/callback
+# flow. This trades a little precision (validation must be absent from the
+# whole file, not provably "in between") for recall on the realistic
+# multi-handler shape, which is the more common real-world pattern.
+_OAUTH_REDIRECT_URI_FROM_REQUEST = re.compile(
+    r"redirect_uri\s*=\s*(?:req(?:uest)?\.(?:query|body|params|args)\b|"
+    r"query_params\.get\(\s*[\"']redirect_uri|params\.get\(\s*[\"']redirect_uri|"
+    r"req\.query\.redirect_uri|request\.GET\.get\(\s*[\"']redirect_uri)|"
+    r"\{[^}]{0,200}\bredirect_uri\b[^}]{0,200}\}\s*=\s*(?:req(?:uest)?|ctx)\."
+    r"(?:query|body|params|args)\b",
+    re.IGNORECASE,
+)
+_OAUTH_REDIRECT_CALL = re.compile(
+    r"(?:res(?:ponse)?\.redirect\(|RedirectResponse\(|redirect\(\s*(?:url\s*=\s*)?)"
+    r"[^)\n]{0,60}redirect_uri",
+    re.IGNORECASE,
+)
+_OAUTH_REDIRECT_URI_VALIDATED = re.compile(
+    r"allowlist|allow_list|registered_redirect|redirect_uris\s*\.\s*(?:includes|has|contains)|"
+    r"validate_redirect|check_redirect_uri|redirect_uri\s*(?:==|!=|in\s|not\s+in\s)",
+    re.IGNORECASE,
+)
+
+# SRC-015: the inbound Authorization header is captured into a variable that
+# is later re-forwarded as an outbound request's own Authorization header
+# (token passthrough) -- explicitly forbidden by the MCP spec's Security Best
+# Practices ("MCP servers MUST NOT accept any tokens that were not explicitly
+# issued for the MCP server"). Matched the way this project found it in the
+# wild (Dify): a caller-configurable upstream URL receives the caller's own
+# live session credential.
+_INBOUND_AUTH_CAPTURE = re.compile(
+    r"\b(\w+)\s*=\s*(?:req(?:uest)?\.headers(?:\.get)?\(?\s*\[?\s*[\"']authorization[\"']\]?\)?)",
+    re.IGNORECASE,
+)
+
+# SRC-016: a write/destructive-capability flag that gates a tool-LIST function
+# but that this file never references again near a tool-CALL/dispatch
+# function -- the flag hides a tool from discovery without disabling it, the
+# exact "ENABLE_WRITE_OPERATIONS gates tools/list, never tools/call" bug this
+# campaign found in a production crypto-custody MCP server (any caller who
+# already knows the tool name executes it regardless of the flag).
+_WRITE_FLAG_NAME = re.compile(
+    r"\b(ENABLE_WRITE\w*|WRITE_ENABLED|ALLOW_WRITE\w*|ENABLE_DESTRUCTIVE\w*|"
+    r"enable_write_operations|write_operations_enabled|writes_enabled)\b"
+)
+_LIST_TOOLS_FUNC = re.compile(
+    r"(?:def|function|async function|func)\s+\w*(?:list_tools|listTools|get_tools|"
+    r"getTools|available_tools|availableTools)\w*\s*\(",
+    re.IGNORECASE,
+)
+# Bounds the list-tools function body at the next top-level function
+# definition (a fixed-size window would, on a short file, swallow the very
+# next function -- e.g. the call_tool dispatcher -- and wrongly count its
+# flag reference as "inside" the list function instead of "elsewhere").
+_NEXT_FUNC_BOUNDARY = re.compile(r"^\s*(?:def|function|async function|func)\s+\w+", re.MULTILINE)
+
+# SRC-017: an HTTP header value is assigned straight to an
+# authorization/tenant-scoping identity variable, with no authentication-check
+# call anywhere in the file -- the "x-rls-user-id decides which customers'
+# data you see, and nothing upstream ever checks who you are" pattern this
+# campaign found giving full-database access in a Microsoft sample MCP server.
+#
+# Matches two shapes: the direct read (identity_var = request.headers.get(...))
+# and, since it's at least as common in real code, an indirection through a
+# small wrapper helper (identity_var = get_header(ctx, "x-rls-user-id")) --
+# verified against the actual confirmed-vulnerable Microsoft retail source,
+# whose real code uses exactly this wrapper shape and which an earlier,
+# direct-read-only version of this rule MISSED entirely.
+_HEADER_AS_IDENTITY = re.compile(
+    r"\b(\w*(?:user_id|tenant_id|org_id|account_id|rls_user\w*|scope_id)\w*)\s*=\s*"
+    r"(?:(?:request|req)\.headers(?:\.get)?\(?\s*\[?\s*[\"'][\w-]+[\"']\]?\)?|"
+    r"\w*[Hh]eader\w*\(\s*[^)\n]*[\"'][\w-]+[\"']\s*\))",
+    re.IGNORECASE,
+)
+_AUTH_CHECK_PRESENT = re.compile(
+    r"\b(?:verify_token|authenticate|require_auth|check_auth|Depends\(\s*get_current_user|"
+    r"login_required|jwt\.decode|verify_jwt|validate_token|check_permission|"
+    r"authorization_header|Bearer\s+token)\b",
+    re.IGNORECASE,
+)
+
+# SRC-018: a filesystem path is built by joining a base directory with a
+# request/tool-argument-derived value and fed into a file open/read/write
+# call, with no containment check in between. This replaces the earlier,
+# much weaker "a parameter happens to be named 'path'" heuristic -- per this
+# project's own architecture research, lexical cleaning (os.path.normpath,
+# path.Clean) does NOT count as sanitization, only realpath-resolution plus
+# a prefix/containment check does, so that's specifically what's checked for.
+# Two shapes are matched: the value inline in the join call itself
+# (os.path.join(base, request.args.get("f"))), and the far more common
+# "extract to a variable first, then join" shape (f = request.args.get("f");
+# os.path.join(base, f)) -- tracked the same two-pass way as SRC-015/019.
+_PATH_JOIN_WITH_ARG_INLINE = re.compile(
+    r"(?:os\.path\.join\(|path\.join\(|Path\([^)\n]*\)\s*/\s*)"
+    r"[^)\n]{0,80}\b(?:args|params|kwargs|request|req)\b",
+    re.IGNORECASE,
+)
+_ARG_DERIVED_ASSIGN = re.compile(
+    r"\b(\w+)\s*=\s*(?:(?:request|req)\.(?:args|params|query)|params|kwargs)\s*(?:\.get\(|\[)",
+    re.IGNORECASE,
+)
+_PATH_JOIN_CALL = re.compile(r"os\.path\.join\(|path\.join\(|Path\([^)\n]*\)\s*/\s*", re.IGNORECASE)
+_FILE_OPEN_CALL = re.compile(
+    r"\bopen\(|\.read_text\(|\.write_text\(|readFile\(|writeFile\(|fs\.open\(",
+)
+_PATH_CONTAINMENT_CHECK = re.compile(
+    r"realpath|resolve\(\)\.is_relative_to|is_relative_to\(|commonpath|"
+    r"secure_filename|\.\.\s*(?:in|not\s+in)|startswith\(\s*(?:base|root|safe)",
+    re.IGNORECASE,
+)
+
+# SRC-019: unescaped shell interpolation, WITHOUT requiring the repo-wide
+# "already knows the risk" corroboration SRC-009 requires -- a deliberately
+# broader-recall companion, since 43% of MCP CVEs filed in early 2026 were
+# shell/exec injection (the single largest real-world MCP vulnerability
+# class). Only excluded when the SAME call site also uses a known escaping
+# helper on the interpolated value, so a properly-quoted call doesn't fire.
+_SHELL_ESCAPED_INLINE = re.compile(r"shlex\.quote\(|shellQuote\(|escapeShellArg\(")
+
+# SRC-020: unencoded user input concatenated/interpolated directly into a URL
+# query string, instead of going through a proper encoder. This is the
+# statically-detectable root cause behind HTTP Parameter Pollution and query-
+# string injection -- true HPP is a differential/dynamic bug (two components
+# parsing duplicate params differently) that can't be proven from source
+# alone, but "a variable lands in a URL query string unescaped" is the
+# concrete, checkable precondition for it, the same scope Datadog's own
+# static HPP rule uses.
+_URL_QUERY_STRING_BUILD = re.compile(
+    r"""[\"']\?[\w=&{}$]*\{[^}]+\}|[\"']\?[\w=&]*[\"']\s*\+\s*\w+|"""
+    r"""f[\"'][^\"']*\?[\w=&]*\{[^}]+\}""",
+)
+_URL_ENCODING_CALL = re.compile(
+    r"urlencode\(|URLSearchParams\(|quote_plus\(|encodeURIComponent\(|querystring\.stringify\(",
+    re.IGNORECASE,
+)
+# Database connection strings (postgresql://user:pass@host/db?application_name=...)
+# use the same "?key=value" shape as an HTTP query string but aren't one --
+# there's no downstream HTTP component to differentially parse it, so this
+# isn't HPP-adjacent. Verified against a real false positive this rule
+# produced on an actual scanned MCP server's DB config before adding the
+# exclusion (a postgres_url property, not a network request).
+_DB_CONNECTION_SCHEME = re.compile(
+    r"(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|sqlite|mssql|oracle)://",
+    re.IGNORECASE,
+)
+
 _SRC_EXTS = {".go", ".py", ".ts", ".js", ".cs", ".rs", ".swift"}
 # Matched against whole PATH COMPONENTS (via Path.parts), not a substring of
 # the stringified path. Substring matching on e.g. "/test" also matches any
@@ -245,6 +488,28 @@ def _line_of(text: str, idx: int) -> int:
     return text.count("\n", 0, idx) + 1
 
 
+# Inline suppression: `# safeguard: ignore[SRC-013]` (or `// ...` for
+# brace-language files), optionally with a trailing reason after the bracket
+# and/or multiple comma-separated rule IDs. `ignore[*]` silences every rule
+# flagged on that line. Adopting a scanner on an existing codebase without a
+# way to mark accepted findings is the single fastest way a team abandons it.
+_SUPPRESS_COMMENT = re.compile(
+    r"(?:#|//)\s*safeguard:\s*ignore\[([A-Z0-9*,\s-]+)\]", re.IGNORECASE
+)
+
+
+def _is_suppressed(lines: list[str], line_no: int, rule_id: str) -> bool:
+    """True if source line `line_no` (1-indexed) carries an inline
+    suppression comment naming `rule_id` (or `*`)."""
+    if line_no < 1 or line_no > len(lines):
+        return False
+    m = _SUPPRESS_COMMENT.search(lines[line_no - 1])
+    if not m:
+        return False
+    ids = {i.strip().upper() for i in m.group(1).split(",")}
+    return "*" in ids or rule_id.upper() in ids
+
+
 def scan_source_tree(root: str | Path) -> list[SourceFinding]:
     """Walk a source tree and return heuristic code-level security findings."""
     root = Path(root)
@@ -258,13 +523,18 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
 
     for path, text in files:
         rel = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
+        # Collected separately from `findings` and filtered against inline
+        # suppression comments just before merging into the real result --
+        # keeps every rule block below unchanged (still just "append a
+        # finding"), with suppression handled once, in one place, per file.
+        file_findings: list[SourceFinding] = []
 
         # SRC-001 (Go): a RoundTrip that sets Authorization, in a file whose
         # package sets no CheckRedirect -> auth may survive a cross-host redirect.
         if path.suffix == ".go" and _GO_ROUNDTRIP.search(text):
             m = _GO_AUTH_SET.search(text)
             if m and "CheckRedirect" not in text:
-                findings.append(SourceFinding(
+                file_findings.append(SourceFinding(
                     "SRC-001", Severity.MEDIUM,
                     "Auth header re-applied in transport without redirect guard",
                     "A custom http.RoundTripper sets the Authorization header on every "
@@ -283,7 +553,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         if path.suffix == ".py" and _PY_HTTPX_CLIENT.search(text):
             if _PY_FOLLOW_REDIRECTS_TRUE.search(text) and _PY_AUTH_HEADER.search(text):
                 m = _PY_FOLLOW_REDIRECTS_TRUE.search(text)
-                findings.append(SourceFinding(
+                file_findings.append(SourceFinding(
                     "SRC-002", Severity.MEDIUM,
                     "httpx client follows redirects while carrying a bearer token",
                     "An httpx client is created with follow_redirects=True and an "
@@ -300,7 +570,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # SRC-003 (SQL read-only by string check only, no DB-level read-only txn).
         if _SQL_STARTSWITH_SELECT.search(text) and not _SQL_DB_READONLY.search(text):
             m = _SQL_STARTSWITH_SELECT.search(text)
-            findings.append(SourceFinding(
+            file_findings.append(SourceFinding(
                 "SRC-003", Severity.HIGH,
                 "SQL read-only enforced by string prefix check only",
                 "Read-only mode is gated on the query text starting with 'select' with "
@@ -317,7 +587,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # SRC-004: server-held credential sent to an interpolated (possibly
         # caller-controlled) destination host.
         for m in _CRED_TO_HOST.finditer(text):
-            findings.append(SourceFinding(
+            file_findings.append(SourceFinding(
                 "SRC-004", Severity.HIGH,
                 "Credential attached to a caller-influenced destination host",
                 "A token/secret/API key is placed as the connection password (or "
@@ -343,7 +613,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             and not _AUTH_GATE.search(text)
         ):
             m = _AUTH_WARN_ONLY.search(text)
-            findings.append(SourceFinding(
+            file_findings.append(SourceFinding(
                 "SRC-005", Severity.HIGH,
                 "Auth flag parsed and warned about, never enforced before serving",
                 "An auth-token flag/env var is parsed and referenced (e.g. in a "
@@ -362,7 +632,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # SRC-006: client-supplied resource ID keys shared state, no ownership check.
         m = _ID_KEYED_STATE.search(text)
         if m and not _OWNERSHIP_CHECK.search(text):
-            findings.append(SourceFinding(
+            file_findings.append(SourceFinding(
                 "SRC-006", Severity.HIGH,
                 "Client-supplied resource ID keys shared state with no ownership check",
                 "A session/chat/connection ID taken from the request is used "
@@ -388,7 +658,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                 and not _CALL_NAME_CHECK.search(body)
                 and _CLASSIFIER_GATES_EXECUTION.search(text)
             ):
-                findings.append(SourceFinding(
+                file_findings.append(SourceFinding(
                     "SRC-007", Severity.HIGH,
                     "Read-only/destructive classifier recognizes syntax, not calls",
                     "A function used to gate execution (confirmed: something in "
@@ -409,7 +679,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # SRC-008: client-supplied owner/user_id trusted directly on a mutation.
         om = _CLIENT_OWNER_FIELD.search(text)
         if om and _MUTATION_CALL.search(text) and not _SERVER_DERIVED_IDENTITY.search(text):
-            findings.append(SourceFinding(
+            file_findings.append(SourceFinding(
                 "SRC-008", Severity.HIGH,
                 "Client-supplied ownership field trusted on create/update",
                 "A create/update handler reads an ownership-designating field "
@@ -432,7 +702,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             if sm:
                 window = text[sm.start():sm.start() + 200]
                 if _SHELL_INTERP_MARK.search(window):
-                    findings.append(SourceFinding(
+                    file_findings.append(SourceFinding(
                         "SRC-009", Severity.HIGH,
                         "Unescaped interpolation into a shell command",
                         "A variable is interpolated into a shell command string "
@@ -456,7 +726,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             if fm:
                 window = text[max(0, fm.start() - 100):fm.start() + 250]
                 if not _PERM_HARDEN.search(window):
-                    findings.append(SourceFinding(
+                    file_findings.append(SourceFinding(
                         "SRC-010", Severity.MEDIUM,
                         "Credential file written without permission hardening",
                         "A file write whose path/filename looks like a "
@@ -478,7 +748,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             tail = text[vm.end():vm.end() + 600]
             fm2 = _SSRF_RAW_FETCH_CALL.search(tail)
             if fm2 and not _SSRF_PINNED_FETCH.search(tail[:fm2.end()]):
-                findings.append(SourceFinding(
+                file_findings.append(SourceFinding(
                     "SRC-011", Severity.HIGH,
                     "SSRF guard validates once; fetch call re-resolves DNS separately",
                     "A hostname/IP is validated against a private/metadata "
@@ -504,7 +774,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             if _SENTINEL_SKIP_BRANCH.search(tail):
                 window = text[sc.start():sc.end() + 150]
                 if _DEBUG_ONLY_LOG.search(window) and not _WARN_OR_ERROR_LOG.search(window):
-                    findings.append(SourceFinding(
+                    file_findings.append(SourceFinding(
                         "SRC-012", Severity.MEDIUM,
                         "Manifest entry silently dropped with only debug-level logging",
                         "An entry matching a sentinel condition (unresolved "
@@ -522,6 +792,257 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                         "downstream security analysis.",
                         5.5,
                     ))
+
+        # SRC-013: TLS certificate verification explicitly disabled.
+        for tm in _TLS_VERIFY_DISABLED.finditer(text):
+            file_findings.append(SourceFinding(
+                "SRC-013", Severity.HIGH,
+                "TLS certificate verification disabled",
+                "Certificate verification is explicitly turned off for an "
+                "outbound connection, which defeats TLS's protection against "
+                "man-in-the-middle attacks -- any network position between "
+                "this server and its target can intercept or tamper with "
+                "the traffic, including credentials sent over it.",
+                f"{rel}:{_line_of(text, tm.start())}",
+                text[max(0, tm.start() - 30):tm.start() + 60].strip(),
+                "Never disable certificate verification outside a test "
+                "fixture. If a self-signed/internal CA must be trusted, "
+                "point the client at that CA's certificate bundle instead "
+                "of disabling verification entirely.",
+                7.4,
+            ))
+
+        # SRC-014: redirect_uri taken from the request, used in a redirect
+        # response somewhere in the file, with no allowlist/comparison check
+        # anywhere in the file (see the pattern comment above for why this
+        # checks the whole file rather than a window after the extraction).
+        rm = _OAUTH_REDIRECT_URI_FROM_REQUEST.search(text)
+        cm2 = _OAUTH_REDIRECT_CALL.search(text) if rm else None
+        if rm and cm2 and not _OAUTH_REDIRECT_URI_VALIDATED.search(text):
+            file_findings.append(SourceFinding(
+                "SRC-014", Severity.HIGH,
+                "OAuth redirect_uri used in a redirect with no allowlist check",
+                "A redirect_uri parameter is read directly from the "
+                "incoming request and used to build a redirect response "
+                "somewhere in this file, with no comparison against a "
+                "registered/allowlisted value anywhere in the file "
+                "(including across handlers, e.g. stored in a session/map "
+                "in one handler and redirected to in another). An attacker "
+                "can supply their own redirect_uri and receive a real "
+                "authorization code intended for the victim "
+                "(authorization-code interception, RFC 9700 SS4.1.1) -- "
+                "the single most common real bug this project's own "
+                "disclosure campaign has found.",
+                f"{rel}:{_line_of(text, rm.start())}",
+                text[rm.start():rm.start() + 90].strip(),
+                "Validate redirect_uri against an exact-match allowlist "
+                "of values registered for that client_id before using it "
+                "in any redirect or token response. Never accept it "
+                "unchecked, and never use prefix/substring matching for "
+                "the comparison.",
+                8.1,
+            ))
+
+        # SRC-015: inbound Authorization header captured, then re-forwarded
+        # as an outbound request header (token passthrough).
+        for im in _INBOUND_AUTH_CAPTURE.finditer(text):
+            var = im.group(1)
+            window = text[im.end():im.end() + 600]
+            forward_re = re.compile(
+                rf"[\"']?[Aa]uthorization[\"']?\s*[:=]\s*(?:f?[\"']?(?:Bearer\s+)?\{{?\s*)?{re.escape(var)}\b"
+            )
+            fm = forward_re.search(window)
+            if fm:
+                file_findings.append(SourceFinding(
+                    "SRC-015", Severity.HIGH,
+                    "Inbound Authorization header re-forwarded to an outbound request",
+                    "The caller's own Authorization header is captured into "
+                    "a variable and then set as the Authorization header on "
+                    "an outbound request elsewhere in this file (token "
+                    "passthrough). The MCP spec's Security Best Practices "
+                    "explicitly forbid this: an MCP server MUST NOT accept "
+                    "or forward a token that was not issued for it. If the "
+                    "outbound destination is caller-influenced, this also "
+                    "hands the caller's live credential to whatever host "
+                    "they name.",
+                    f"{rel}:{_line_of(text, im.start())}",
+                    text[im.start():im.start() + 90].strip(),
+                    "Never forward an inbound token as-is to an upstream "
+                    "call. Issue and use the server's own credential for "
+                    "outbound requests, or perform token exchange "
+                    "(RFC 8693) to obtain a token scoped for that specific "
+                    "downstream audience.",
+                    7.5,
+                ))
+
+        # SRC-016: a write-capability flag gates only the tool-list function,
+        # with no matching reference anywhere else in the file.
+        lm = _LIST_TOOLS_FUNC.search(text)
+        if lm:
+            next_func_m = _NEXT_FUNC_BOUNDARY.search(text, lm.end())
+            body_end = next_func_m.start() if next_func_m else min(len(text), lm.start() + 1200)
+            list_body = text[lm.start():body_end]
+            flag_m = _WRITE_FLAG_NAME.search(list_body)
+            if flag_m:
+                flag_name = flag_m.group(1)
+                outside_text = text[:lm.start()] + text[body_end:]
+                if not re.search(re.escape(flag_name), outside_text):
+                    file_findings.append(SourceFinding(
+                        "SRC-016", Severity.CRITICAL,
+                        "Write-capability flag gates tool listing, not tool execution",
+                        f"'{flag_name}' controls what appears in the "
+                        "tool-list function here, but this file never "
+                        "references it again anywhere near a tool-call/"
+                        "dispatch function. A caller who already knows the "
+                        "gated tool's name (from documentation, a prior "
+                        "response, or guessing) can call it directly "
+                        "regardless of the flag -- the flag hides discovery, "
+                        "it does not disable execution. This is the exact "
+                        "bug class this project's own campaign found in a "
+                        "production crypto-custody MCP server, where it "
+                        "gated visibility of a real fund-transfer tool but "
+                        "not the ability to call it.",
+                        f"{rel}:{_line_of(text, lm.start())}",
+                        text[flag_m.start():flag_m.start() + 60].strip(),
+                        "Check the same flag inside the tool-call/dispatch "
+                        "path too (not only the list path), and reject the "
+                        "call outright when the flag is unset -- a safety "
+                        "control must gate execution, not just discovery.",
+                        9.1,
+                    ))
+
+        # SRC-017: an HTTP header value is used as an authorization/tenant-
+        # scoping identity, with no authentication check anywhere in the file.
+        hm = _HEADER_AS_IDENTITY.search(text)
+        if hm and not _AUTH_CHECK_PRESENT.search(text):
+            file_findings.append(SourceFinding(
+                "SRC-017", Severity.CRITICAL,
+                "Header value used as authorization identity with no authentication check",
+                "A value read directly from an HTTP header is used as an "
+                "authorization or tenant-scoping identity (its name "
+                "suggests user/tenant/org/account/RLS scoping), and this "
+                "file contains no authentication-check call anywhere -- "
+                "nothing verifies the caller actually owns the identity the "
+                "header claims. Any caller can set this header to any "
+                "value (including a documented 'admin'/'all access' "
+                "default) and receive that identity's data. This is the "
+                "exact pattern this project's campaign found giving full, "
+                "unauthenticated database access in a production sample "
+                "MCP server.",
+                f"{rel}:{_line_of(text, hm.start())}",
+                text[hm.start():hm.start() + 90].strip(),
+                "Never let a caller-supplied header set its own "
+                "authorization identity. Authenticate the caller first "
+                "(verified token/session), then derive the "
+                "tenant/user/org scope server-side from that authenticated "
+                "identity -- never trust a header for it.",
+                9.8,
+            ))
+
+        # SRC-018: path joined with a request/argument-derived value, fed
+        # into a file operation, with no containment check in between.
+        # Try the inline shape first, then the assign-then-join shape.
+        pjm = _PATH_JOIN_WITH_ARG_INLINE.search(text)
+        src018_window = text[pjm.start():pjm.start() + 400] if pjm else None
+        if pjm is None:
+            for am in _ARG_DERIVED_ASSIGN.finditer(text):
+                var = am.group(1)
+                lookahead = text[am.end():am.end() + 400]
+                jm = _PATH_JOIN_CALL.search(lookahead)
+                if jm and re.search(rf"\b{re.escape(var)}\b", lookahead[jm.start():jm.end() + 120]):
+                    pjm = am  # anchor the reported location at the assignment
+                    src018_window = lookahead[jm.start():jm.end() + 300]
+                    break
+        if pjm and src018_window is not None:
+            if _FILE_OPEN_CALL.search(src018_window) and not _PATH_CONTAINMENT_CHECK.search(src018_window):
+                file_findings.append(SourceFinding(
+                    "SRC-018", Severity.HIGH,
+                    "Path traversal: joined path used with no containment check",
+                    "A filesystem path is built by joining a base directory "
+                    "with a request/tool-argument-derived value, then used "
+                    "in a file open/read/write call, with no containment "
+                    "check (realpath + prefix check, is_relative_to, "
+                    "secure_filename, or explicit '..' rejection) anywhere "
+                    "in between. Lexical cleaning alone (os.path.normpath, "
+                    "path.Clean) does not stop this -- only resolving the "
+                    "real path and checking it stays under the base "
+                    "directory does. A value like '../../etc/passwd' or an "
+                    "absolute path can escape the intended directory.",
+                    f"{rel}:{_line_of(text, pjm.start())}",
+                    text[pjm.start():pjm.start() + 90].strip(),
+                    "After joining, resolve the real path (os.path.realpath/"
+                    "Path.resolve()) and verify it is still relative to the "
+                    "base directory (Path.is_relative_to() or a commonpath "
+                    "check) before opening it. Reject the request if not.",
+                    8.6,
+                ))
+
+        # SRC-019: unescaped shell interpolation -- broader companion to
+        # SRC-009, no repo-wide corroboration required (see module docstring).
+        sm2 = _SHELL_STRING_CALL.search(text)
+        if sm2:
+            window2 = text[sm2.start():sm2.start() + 200]
+            if _SHELL_INTERP_MARK.search(window2) and not _SHELL_ESCAPED_INLINE.search(window2):
+                file_findings.append(SourceFinding(
+                    "SRC-019", Severity.MEDIUM,
+                    "Unescaped interpolation into a shell command (broad check)",
+                    "A variable is interpolated into a shell command string "
+                    "passed to exec/system, with no escaping helper "
+                    "(shlex.quote/shellQuote/escapeShellArg) applied at this "
+                    "call site. Unlike SRC-009, this fires without requiring "
+                    "evidence the repo already knows the risk elsewhere -- "
+                    "broader recall, so treat this one as a lead to confirm "
+                    "even more than the other source-audit rules: check "
+                    "whether the interpolated value can ever be influenced "
+                    "by a tool caller (directly or via prompt injection).",
+                    f"{rel}:{_line_of(text, sm2.start())}",
+                    window2[:90].strip(),
+                    "Use an argv-array exec (execFile/spawn with an args "
+                    "list, or subprocess.run([...], shell=False)) or quote "
+                    "the interpolated value with shlex.quote/shellQuote "
+                    "before building the shell string.",
+                    7.0,
+                ))
+
+        # SRC-020: unencoded value built directly into a URL query string --
+        # the statically-checkable root cause behind HTTP Parameter Pollution
+        # and query-string injection (true HPP itself needs dynamic testing;
+        # this is the concrete precondition that's actually detectable here).
+        uqm = _URL_QUERY_STRING_BUILD.search(text)
+        if uqm:
+            window3 = text[max(0, uqm.start() - 60):uqm.start() + 120]
+            if not _URL_ENCODING_CALL.search(window3) and not _DB_CONNECTION_SCHEME.search(window3):
+                file_findings.append(SourceFinding(
+                    "SRC-020", Severity.MEDIUM,
+                    "Unencoded value interpolated into a URL query string",
+                    "A value is concatenated or interpolated directly into "
+                    "a URL query string instead of being passed through a "
+                    "proper query-string encoder. Beyond the obvious "
+                    "injection risk if the value contains '&'/'=' or other "
+                    "query metacharacters, this is the concrete, statically-"
+                    "checkable precondition for HTTP Parameter Pollution -- "
+                    "a downstream component that parses duplicate/malformed "
+                    "parameters differently than this code expects can be "
+                    "made to see a different value than what was intended.",
+                    f"{rel}:{_line_of(text, uqm.start())}",
+                    text[uqm.start():uqm.start() + 90].strip(),
+                    "Build query strings with a proper encoder "
+                    "(urllib.parse.urlencode, URLSearchParams, "
+                    "querystring.stringify) instead of string "
+                    "concatenation/interpolation.",
+                    5.5,
+                ))
+
+        # Apply inline suppression once per file: a finding whose flagged
+        # line carries `# safeguard: ignore[RULE-ID]` (or `// ...` for
+        # brace-language files) is dropped before merging into the real
+        # result. `ignore[*]` silences every rule on that line.
+        source_lines = text.splitlines()
+        for ff in file_findings:
+            line_str = ff.location.rsplit(":", 1)[-1]
+            line_no = int(line_str) if line_str.isdigit() else 0
+            if not _is_suppressed(source_lines, line_no, ff.rule_id):
+                findings.append(ff)
 
     return findings
 

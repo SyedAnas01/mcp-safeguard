@@ -217,6 +217,24 @@ _OAUTH_SCOPE_RISKS: list[tuple[str, Severity, str, str, float]] = [
     (r"\brepo\b(?!:read)", Severity.MEDIUM, "OAUTH-007", "Full Repository OAuth Scope", 5.5),
 ]
 
+# Sensitive env var NAME patterns (flag by name regardless of value) --
+# hoisted to module level (was previously local to scan_for_credentials) so
+# these 11 real, active rules (CRED-018..028) are visible to introspection
+# (security://rules) and doc-count generation, not just to the scan itself.
+_SENSITIVE_ENV_NAMES: list[tuple[str, str, str, float]] = [
+    (r"(?i)(stripe.*(key|secret|token)|stripe_secret)", "CRED-018", "Stripe Credential in Environment", 8.5),
+    (r"(?i)(openai.*(key|secret|token)|openai_api_key)", "CRED-019", "OpenAI Credential in Environment", 8.5),
+    (r"(?i)(anthropic.*(key|secret|token)|claude_api_key)", "CRED-020", "Anthropic Credential in Environment", 8.5),
+    (r"(?i)(twilio.*(sid|token|secret)|twilio_auth)", "CRED-021", "Twilio Credential in Environment", 7.5),
+    (r"(?i)(sendgrid.*(key|token)|sendgrid_api)", "CRED-022", "SendGrid Credential in Environment", 7.5),
+    (r"(?i)(slack.*(token|secret|webhook)|slack_bot_token)", "CRED-023", "Slack Credential in Environment", 7.5),
+    (r"(?i)(github.*(token|pat|key)|gh_token|github_token)", "CRED-024", "GitHub Credential in Environment", 8.0),
+    (r"(?i)(aws.*(access.*key|secret.*key)|aws_access_key_id|aws_secret)", "CRED-025", "AWS Credential in Environment", 9.5),
+    (r"(?i)(huggingface|hugging_face|hf).*token|hf_token", "CRED-026", "Hugging Face Credential in Environment", 8.0),
+    (r"(?i)(replicate.*(token|key|api))", "CRED-027", "Replicate Credential in Environment", 8.5),
+    (r"(?i)(cohere.*(key|token|api))", "CRED-028", "Cohere Credential in Environment", 8.0),
+]
+
 # Environment variable exposure patterns
 _ENV_VAR_PATTERNS: list[tuple[str, Severity, str]] = [
     (r"\$\{?[A-Z_]{3,}[A-Z0-9_]*\}?", Severity.INFO, "Direct env var reference in tool definition"),
@@ -279,21 +297,6 @@ def scan_for_credentials(config: dict[str, Any]) -> list[CredentialFinding]:
 
     # Check env section specifically
     env_vars = config.get("env", {})
-
-    # Sensitive env var name patterns (flag by name regardless of value)
-    _SENSITIVE_ENV_NAMES: list[tuple[str, str, str, float]] = [
-        (r"(?i)(stripe.*(key|secret|token)|stripe_secret)", "CRED-018", "Stripe Credential in Environment", 8.5),
-        (r"(?i)(openai.*(key|secret|token)|openai_api_key)", "CRED-019", "OpenAI Credential in Environment", 8.5),
-        (r"(?i)(anthropic.*(key|secret|token)|claude_api_key)", "CRED-020", "Anthropic Credential in Environment", 8.5),
-        (r"(?i)(twilio.*(sid|token|secret)|twilio_auth)", "CRED-021", "Twilio Credential in Environment", 7.5),
-        (r"(?i)(sendgrid.*(key|token)|sendgrid_api)", "CRED-022", "SendGrid Credential in Environment", 7.5),
-        (r"(?i)(slack.*(token|secret|webhook)|slack_bot_token)", "CRED-023", "Slack Credential in Environment", 7.5),
-        (r"(?i)(github.*(token|pat|key)|gh_token|github_token)", "CRED-024", "GitHub Credential in Environment", 8.0),
-        (r"(?i)(aws.*(access.*key|secret.*key)|aws_access_key_id|aws_secret)", "CRED-025", "AWS Credential in Environment", 9.5),
-        (r"(?i)(huggingface|hugging_face|hf).*token|hf_token", "CRED-026", "Hugging Face Credential in Environment", 8.0),
-        (r"(?i)(replicate.*(token|key|api))", "CRED-027", "Replicate Credential in Environment", 8.5),
-        (r"(?i)(cohere.*(key|token|api))", "CRED-028", "Cohere Credential in Environment", 8.0),
-    ]
 
     for key, value in env_vars.items():
         # Check by env var name (catches redacted/placeholder values too)

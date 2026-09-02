@@ -290,7 +290,10 @@ def scan_for_tool_poisoning(tool_definitions: list[dict[str, Any]]) -> list[Tool
 
     for tool in tool_definitions:
         tool_name = tool.get("name", "<unnamed>")
-        description = tool.get("description", "")
+        # .get(..., "") only supplies the default when the key is absent; a tool
+        # definition with the (valid) "description": null crashes re.search below
+        # with a None value unless the falsy null is also caught here.
+        description = tool.get("description") or ""
 
         for pattern, severity, rule_id, title, cvss_score in _POISONING_PATTERNS:
             match = re.search(pattern, description, re.IGNORECASE | re.DOTALL)

@@ -2,6 +2,101 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.6.0] - 2026-09-02
+
+### Fixed — 3 critical bugs found by a full line-by-line code audit
+- **`scan_for_tool_poisoning` crashed on `"description": null`** — `tool.get("description", "")`
+  only supplies the default when the key is *absent*; a tool with the valid JSON
+  `"description": null` reached `re.search()` with `None` and raised `TypeError`,
+  taking down the whole CLI scan (and, via `scan_mcp_server`'s broad exception
+  handler, silently discarding every other finding for the target).
+- **`scan_mcp_server`'s tool-fetch path had no SSRF/DNS-rebinding protection** — the
+  exact vulnerability class this tool exists to detect in *other* servers. `validate_url()`
+  alone only rejects a literal private/metadata IP; a caller-supplied hostname that
+  *resolves* to one reached `_fetch_tools_via_mcp`/the httpx fallback completely
+  unguarded, with any caller-supplied `auth_token` attached. Now resolves the target
+  host and rejects private/reserved/metadata addresses before connecting.
+- **Stored XSS in the tool's own HTML reports** — a scanned server's tool name (fully
+  attacker-controlled when scanning a hostile/compromised server) was interpolated
+  unescaped into both `generate_html_report()` (MCP server + on-disk reports) and the
+  CLI's `--output report.html` writer.
+
+### Fixed — other real bugs from the same audit
+- `Dockerfile`'s `CMD` used `python -m fastmcp run ...`, which doesn't exist for the
+  pinned fastmcp version (`fastmcp` ships a console script, not a `__main__`) —
+  the container couldn't start as shipped. Registered a real `/health` route and
+  fixed the healthcheck to actually check the response status.
+- `endpoint_scanner.py`'s `.local`/`.internal` hostname suffix bypassed the SSRF
+  allowlist entirely (EP-SSRF-001's own blind spot) — removed; the DNS-rebinding
+  guard now also checks the full RFC1918/ULA range, not just link-local + metadata.
+- Rate limiting and audit logging were keyed by a static env-var placeholder shared
+  by every caller, not the real per-API-key identity `_check_auth()` already
+  computed — one caller could exhaust the shared bucket for everyone else, and
+  audit logs couldn't attribute actions to the actual caller. Auth failures are
+  now also logged and counted (`auth_failures` metric was defined but never
+  incremented).
+- `_SENSITIVE_ENV_NAMES` (11 real credential rules — CRED-018..028, including
+  Hugging Face/Replicate/Cohere) was defined *inside* `scan_for_credentials()`,
+  invisible to introspection — hoisted to module level.
+- `--output`/`--format json` printed the banner and status lines to stdout too,
+  so `scan-source . --format json > baseline.json` silently produced invalid
+  JSON. Machine-readable formats now own stdout exclusively; status moves to stderr.
+
+### Added — 8 new source-audit rules (`SRC-013`..`SRC-020`)
+Each is derived from a real bug shape this project's own disclosure campaign found
+repeatedly across unrelated MCP servers — not a hypothetical:
+- `SRC-013` — TLS certificate verification disabled (`verify=False`, `ssl.CERT_NONE`, etc.)
+- `SRC-014` — OAuth `redirect_uri` used in a redirect with no allowlist check anywhere
+  in the file (authorization-code interception, RFC 9700 §4.1.1) — the single most
+  common real vulnerability this campaign found, including two confirmed government
+  MCP servers and a live-verified production auth bypass (Emporia Energy)
+- `SRC-015` — inbound `Authorization` header re-forwarded to an outbound request
+  (token passthrough — forbidden outright by the MCP spec's Security Best Practices)
+- `SRC-016` — a write/destructive-capability flag gates only the tool-*list* response
+  with no matching gate near the tool-*call* dispatcher (hides discovery, not
+  execution — the exact bug found in a production crypto-custody MCP server)
+- `SRC-017` — an HTTP header value used directly as an authorization/tenant-scoping
+  identity with no authentication check anywhere in the file (found giving full,
+  unauthenticated database access in a Microsoft sample MCP server)
+- `SRC-018` — real path traversal: a joined path used in a file operation with no
+  realpath+containment check, replacing the earlier "parameter is named 'path'" heuristic
+- `SRC-019` — unescaped shell interpolation, broader-recall companion to `SRC-009`
+  that doesn't require repo-wide corroboration (43% of MCP CVEs filed in early 2026
+  were shell/exec injection — the single largest real-world MCP vulnerability class)
+- `SRC-020` — unencoded value in a URL query string (the statically-detectable root
+  cause behind HTTP Parameter Pollution)
+
+`SRC-014` and `SRC-017` were each fixed at least once *after* being validated against
+the real vulnerable source they were derived from (not just their own synthetic unit
+test) — see the benchmark below and the rules' comments in `source_scanner.py` for
+what the first version missed.
+
+### Added — SARIF output, suppressions, baseline
+- `--format sarif` / `--output results.sarif` emits SARIF 2.1.0 for `scan` and
+  `scan-source`, for GitHub code scanning (`github/codeql-action/upload-sarif`) and
+  any other SARIF-consuming CI.
+- Inline suppression for `scan-source`: `# safeguard: ignore[SRC-013] reason` (or
+  `// ...`) on the flagged line, `ignore[*]` for all rules on that line.
+- `--baseline <file>` for `scan-source`: adopt today's findings once
+  (`scan-source . --format json > baseline.json`), then only fail CI on genuinely
+  new ones — the standard way a team adopts a scanner on an existing codebase.
+
+### Added — a real-world benchmark, not just synthetic tests
+- `tests/test_benchmark_confirmed_vulnerable.py` scans a fixture reproduced (with
+  attribution, MIT license) from an actual, independently-confirmed vulnerable MCP
+  server and asserts the right rule fires at the right file:line and severity. Most
+  security scanners' test suites only prove a rule matches its own hand-written
+  fixture; this proves at least one rule survives contact with real production code.
+
+### Changed
+- `credential_scanner.py`: `_SENSITIVE_ENV_NAMES` moved to module level (see Fixed).
+- `security://rules` resource now includes the `ssrf` and `source_audit` categories
+  (previously omitted entirely — the live rule count was undercounted by 20).
+- README.md and OWASP-ALIGNMENT.md rule counts and per-category tables corrected
+  to match the actual code (previous numbers were stale/wrong in several places —
+  e.g. OWASP-ALIGNMENT.md's Tool Poisoning and SSRF tables listed rule IDs, titles,
+  and even a `SS-004` rule that didn't exist anywhere in the codebase).
+
 ## [0.5.0] - 2026-09-01
 ### Added
 - **8 new source-audit rules** (`SRC-005`..`SRC-012`) closing the gap between what a

@@ -347,4 +347,36 @@ async def test_check_auth_returns_none_when_no_api_key_configured(monkeypatch):
 
     monkeypatch.setattr(settings, "api_key", None)
 
-    assert _check_auth() is None
+    error, client_id = _check_auth()
+    assert error is None
+    assert client_id  # a stable placeholder identity, not empty
+
+
+async def test_check_auth_returns_real_client_id_when_authenticated(monkeypatch):
+    """
+    _check_auth() must return the caller's REAL per-key identity (so rate
+    limiting and audit logs can actually attribute per-caller), not a static
+    env-var placeholder shared by every distinct caller regardless of which
+    key they presented.
+    """
+    from mcp_safeguard import server as server_module
+    from mcp_safeguard.config import settings
+    from mcp_safeguard.security.auth_middleware import authenticate_request
+
+    monkeypatch.setattr(settings, "api_key", "configured-secret-key")
+    monkeypatch.setattr(
+        server_module,
+        "get_http_headers",
+        lambda **_kw: {"authorization": "Bearer configured-secret-key"},
+    )
+
+    error, client_id = server_module._check_auth()
+    assert error is None
+
+    expected_ctx = authenticate_request(
+        api_key_header=None,
+        authorization_header="Bearer configured-secret-key",
+        expected_api_key="configured-secret-key",
+    )
+    assert client_id == expected_ctx.client_id
+    assert client_id != "local"  # must not fall back to the static env placeholder

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
+import socket
 from urllib.parse import urlparse
 
 
@@ -27,6 +28,45 @@ _CLOUD_METADATA_HOSTS = {
     "metadata.azure.com",
     "fd00:ec2::254",
 }
+
+_CLOUD_METADATA_IPS = {"169.254.169.254", "fd00:ec2::254"}
+
+
+def resolves_to_unsafe_ip(host: str) -> bool:
+    """
+    DNS-rebinding guard: resolve `host` and reject if ANY resolved address is a
+    private/reserved IP range (RFC1918/ULA/link-local) or a known cloud metadata
+    IP. This is the canonical shared implementation -- both endpoint_scanner.py
+    and server.py's scan-target intake use it, so a hostname-only allowlist
+    check (which validate_url/validate_host alone cannot do, since they run
+    before any network resolution) can't be bypassed by pointing an
+    innocuous-looking hostname at an internal or metadata address via DNS.
+
+    Args:
+        host: Hostname or IP string to resolve and check.
+
+    Returns:
+        True if any resolved address is private/reserved/metadata, False
+        otherwise (including on a resolution failure -- the caller's own
+        connection attempt will fail too in that case).
+    """
+    try:
+        addrinfo = socket.getaddrinfo(host, None)
+    except OSError:
+        return False
+
+    for _family, _type, _proto, _canonname, sockaddr in addrinfo:
+        ip_str = sockaddr[0]
+        if ip_str in _CLOUD_METADATA_IPS:
+            return True
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        if any(ip in network for network in _PRIVATE_NETWORKS):
+            return True
+
+    return False
 
 
 def validate_url(url: str, allowed_schemes: list[str] | None = None) -> str:

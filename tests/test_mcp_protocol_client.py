@@ -141,6 +141,72 @@ async def test_scan_mcp_server_warns_when_no_tools_retrievable():
     assert any("tool" in w.lower() for w in result["summary"]["warnings"])
 
 
+async def test_scan_mcp_server_blocks_hostname_that_resolves_to_private_ip(monkeypatch):
+    """
+    validate_url() alone only rejects a LITERAL private/metadata IP (its own
+    docstring: hostname resolution "happens at scan time") -- a hostname that
+    RESOLVES to a private/metadata address must also be blocked, before either
+    the MCP-protocol fetch or the httpx fallback ever connects to it. This is
+    the DNS-rebinding SSRF gap the scanner's own SS-* rules exist to detect in
+    OTHER servers; it must not be present in its own outbound requests.
+    """
+    from mcp_safeguard import server as server_module
+
+    monkeypatch.setattr(
+        server_module, "resolves_to_unsafe_ip", lambda host: host == "attacker-controlled.example"
+    )
+
+    called = {"fetch": False}
+
+    async def _should_not_be_called(*_args, **_kwargs):
+        called["fetch"] = True
+        return []
+
+    monkeypatch.setattr(server_module, "_fetch_tools_via_mcp", _should_not_be_called)
+
+    result = await server_module.scan_mcp_server("http://attacker-controlled.example/mcp")
+
+    assert called["fetch"] is False, "tool-fetch must never run once the host is flagged unsafe"
+    assert "error" in result
+
+
+async def test_httpx_fallback_verifies_tls_by_default(monkeypatch):
+    """
+    The httpx fallback sends the caller's auth_token to the scan target --
+    it must verify TLS by default (settings.verify_scan_target_tls), not
+    hardcode verify=False, since that would let a network-position attacker
+    intercept the token. Only an explicit operator opt-out should disable it.
+    """
+    from mcp_safeguard import server as server_module
+    from mcp_safeguard.config import settings
+
+    assert settings.verify_scan_target_tls is True  # secure by default
+
+    captured = {}
+    real_client = server_module.httpx.AsyncClient
+
+    class _CapturingClient(real_client):
+        def __init__(self, *args, **kwargs):
+            captured["verify"] = kwargs.get("verify")
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(server_module.httpx, "AsyncClient", _CapturingClient)
+
+    async def _no_mcp_tools(*_a, **_kw):
+        return []
+
+    monkeypatch.setattr(server_module, "_fetch_tools_via_mcp", _no_mcp_tools)
+    # Isolate the tool-fetch client from endpoint_scanner's own (deliberately
+    # verify=False, uncredentialed) probe client, which also runs during a
+    # full scan and would otherwise overwrite `captured` after this one.
+    monkeypatch.setattr(settings, "enable_network_scan", False)
+
+    port = _free_port()
+    await server_module.scan_mcp_server(f"http://127.0.0.1:{port}", auth_token="secret-token")
+
+    assert captured.get("verify") is True
+
+
 async def test_scan_mcp_server_wires_in_ssrf_scanner(live_ssrf_mcp_server):
     """
     scan_for_ssrf must actually be called as part of the main scan flow —

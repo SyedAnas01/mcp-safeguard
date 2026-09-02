@@ -11,6 +11,7 @@ Usage:
 
 from __future__ import annotations
 
+import html
 import json
 import sys
 import textwrap
@@ -43,14 +44,21 @@ def _color(text: str, code: str) -> str:
     return text
 
 
-def _print_banner() -> None:
+def _status(text: str, *, quiet: bool = False) -> None:
+    """Print a progress/status line -- to stdout normally, but to stderr when
+    a machine-readable format (json/sarif) owns stdout, so piping/redirecting
+    stdout captures only the actual report."""
+    print(text, file=sys.stderr if quiet else sys.stdout)
+
+
+def _print_banner(*, quiet: bool = False) -> None:
     banner = textwrap.dedent("""\
         ┌─────────────────────────────────────────────────┐
         │  mcp-safeguard  —  MCP Security Scanner         │
         │  github.com/SyedAnas01/mcp-safeguard            │
         └─────────────────────────────────────────────────┘
     """)
-    print(_color(banner, _BOLD))
+    _status(_color(banner, _BOLD), quiet=quiet)
 
 
 def _load_config(path: str) -> dict[str, Any]:
@@ -89,6 +97,39 @@ def _severity_value(sev: str) -> int:
     return _SEVERITY_ORDER.get(sev.upper(), 99)
 
 
+def _load_baseline(path: str) -> set[tuple[str, str]]:
+    """
+    Load a baseline file (the same shape `--format json` writes) as a set of
+    (rule_id, location) keys to suppress in this run -- lets a team adopt the
+    scanner on an existing codebase by "accepting" today's findings once,
+    then only failing CI on genuinely NEW ones going forward.
+    """
+    p = Path(path)
+    if not p.exists():
+        return set()
+    try:
+        data = json.loads(p.read_text())
+    except json.JSONDecodeError:
+        print(f"Warning: could not parse baseline file {path} as JSON — ignoring it.", file=sys.stderr)
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return {
+        (str(f.get("rule_id", "")), str(f.get("location", "")))
+        for f in data
+        if isinstance(f, dict)
+    }
+
+
+def _apply_baseline(findings: list[dict[str, Any]], baseline_keys: set[tuple[str, str]]) -> list[dict[str, Any]]:
+    if not baseline_keys:
+        return findings
+    return [
+        f for f in findings
+        if (str(f.get("rule_id", "")), str(f.get("location", ""))) not in baseline_keys
+    ]
+
+
 def _print_finding(rule_id: str, severity: str, title: str, location: str,
                    evidence: str, remediation: str, cvss: float) -> None:
     sev = severity.upper()
@@ -114,9 +155,13 @@ def _run_scan(config_path: str, min_severity: str = "INFO",
     from mcp_safeguard.scanner.ssrf_scanner import scan_for_ssrf
     from mcp_safeguard.scanner.tool_analyzer import scan_for_tool_poisoning
 
-    _print_banner()
-    print(f"Scanning: {_color(config_path, _BOLD)}")
-    print("─" * 60)
+    # Machine-readable formats must produce ONLY that format on stdout, so
+    # `scan config.json --format json > out.json` (or --format sarif) is
+    # actually valid JSON/SARIF -- the banner/status lines move to stderr.
+    quiet = fmt in ("json", "sarif")
+    _print_banner(quiet=quiet)
+    _status(f"Scanning: {_color(config_path, _BOLD)}", quiet=quiet)
+    _status("─" * 60, quiet=quiet)
 
     config = _load_config(config_path)
     tools = _extract_tools(config)
@@ -200,6 +245,12 @@ def _run_scan(config_path: str, min_severity: str = "INFO",
         print(json.dumps(filtered, indent=2))
         return _exit_code(filtered, fail_on)
 
+    if fmt == "sarif":
+        from mcp_safeguard.scanner.report_generator import generate_sarif_report
+
+        print(generate_sarif_report(filtered))
+        return _exit_code(filtered, fail_on)
+
     if not filtered:
         print(_color("  ✓ No findings above threshold.", _GREEN))
     else:
@@ -242,7 +293,7 @@ def _exit_code(findings: list[dict], fail_on: str | None) -> int:
 
 def _run_source_scan(root_path: str, min_severity: str = "INFO",
                       fail_on: str | None = None, output: str | None = None,
-                      fmt: str = "text") -> int:
+                      fmt: str = "text", baseline: str | None = None) -> int:
     """Walk a source tree and run the code-level heuristic rules. Returns exit code."""
     from pathlib import Path as _Path
 
@@ -253,9 +304,10 @@ def _run_source_scan(root_path: str, min_severity: str = "INFO",
         print(f"Error: not a directory: {root_path}", file=sys.stderr)
         sys.exit(1)
 
-    _print_banner()
-    print(f"Source-scanning: {_color(root_path, _BOLD)}")
-    print("─" * 60)
+    quiet = fmt in ("json", "sarif")
+    _print_banner(quiet=quiet)
+    _status(f"Source-scanning: {_color(root_path, _BOLD)}", quiet=quiet)
+    _status("─" * 60, quiet=quiet)
 
     findings = scan_source_tree(root)
     all_findings = [
@@ -272,12 +324,30 @@ def _run_source_scan(root_path: str, min_severity: str = "INFO",
         for f in findings
     ]
 
+    if baseline:
+        baseline_keys = _load_baseline(baseline)
+        before = len(all_findings)
+        all_findings = _apply_baseline(all_findings, baseline_keys)
+        suppressed = before - len(all_findings)
+        if suppressed:
+            print(
+                f"  {_color(str(suppressed), _DIM)} finding(s) suppressed by baseline "
+                f"({baseline}); showing only new/changed findings.",
+                file=sys.stderr,
+            )
+
     min_val = _severity_value(min_severity)
     filtered = [f for f in all_findings if _severity_value(f["severity"]) <= min_val]
     filtered.sort(key=lambda x: (_severity_value(x["severity"]), -x["cvss"]))
 
     if fmt == "json":
         print(json.dumps(filtered, indent=2))
+        return _exit_code(filtered, fail_on)
+
+    if fmt == "sarif":
+        from mcp_safeguard.scanner.report_generator import generate_sarif_report
+
+        print(generate_sarif_report(filtered))
         return _exit_code(filtered, fail_on)
 
     if not filtered:
@@ -310,26 +380,34 @@ def _run_source_scan(root_path: str, min_severity: str = "INFO",
 
 
 def _write_output(findings: list[dict], output: str, scanned: str) -> None:
-    """Write findings to a file (HTML or JSON based on extension)."""
+    """Write findings to a file (HTML, JSON, or SARIF based on extension)."""
     p = Path(output)
     if p.suffix == ".json":
         p.write_text(json.dumps(findings, indent=2))
+    elif p.suffix == ".sarif" or p.name.endswith(".sarif.json"):
+        from mcp_safeguard.scanner.report_generator import generate_sarif_report
+
+        p.write_text(generate_sarif_report(findings))
     else:
-        # Simple HTML report
+        # Simple HTML report. title/location/remediation and rule_id all
+        # ultimately derive from the scanned server's own tool names/config
+        # (fully attacker-controlled when scanning a hostile server), and
+        # `scanned` is the caller-supplied target path/URL — escape all of it
+        # before interpolating into the page.
         rows = ""
         for f in findings:
             color = {"CRITICAL": "#e74c3c", "HIGH": "#e67e22", "MEDIUM": "#f1c40f",
                      "LOW": "#3498db", "INFO": "#95a5a6"}.get(f["severity"], "#666")
             rows += f"""
             <tr>
-              <td><span style="color:{color};font-weight:bold">{f['severity']}</span></td>
-              <td><code>{f['rule_id']}</code></td>
-              <td>{f['title']}</td>
-              <td>{f['location']}</td>
-              <td>{f['cvss']}</td>
-              <td><small>{f['remediation']}</small></td>
+              <td><span style="color:{color};font-weight:bold">{html.escape(str(f['severity']))}</span></td>
+              <td><code>{html.escape(str(f['rule_id']))}</code></td>
+              <td>{html.escape(str(f['title']))}</td>
+              <td>{html.escape(str(f['location']))}</td>
+              <td>{html.escape(str(f['cvss']))}</td>
+              <td><small>{html.escape(str(f['remediation']))}</small></td>
             </tr>"""
-        html = f"""<!DOCTYPE html>
+        page = f"""<!DOCTYPE html>
 <html><head><title>mcp-safeguard Report</title>
 <style>body{{font-family:monospace;background:#0d1117;color:#c9d1d9;padding:2rem}}
 h1{{color:#f0f6fc}}table{{width:100%;border-collapse:collapse}}
@@ -337,12 +415,12 @@ th{{background:#161b22;padding:8px;text-align:left;border-bottom:1px solid #3036
 td{{padding:8px;border-bottom:1px solid #21262d;vertical-align:top}}
 code{{background:#161b22;padding:2px 4px;border-radius:3px}}</style></head>
 <body><h1>🔒 mcp-safeguard Security Report</h1>
-<p>Scanned: <code>{scanned}</code> — {len(findings)} finding(s)</p>
+<p>Scanned: <code>{html.escape(str(scanned))}</code> — {len(findings)} finding(s)</p>
 <table><tr><th>Severity</th><th>Rule</th><th>Finding</th><th>Location</th>
 <th>CVSS</th><th>Remediation</th></tr>{rows}</table>
 <p><small>Generated by <a href="https://github.com/SyedAnas01/mcp-safeguard"
 style="color:#58a6ff">mcp-safeguard</a></small></p></body></html>"""
-        p.write_text(html)
+        p.write_text(page)
     print(f"\nReport saved: {output}")
 
 
@@ -357,28 +435,47 @@ def _print_help() -> None:
         OPTIONS:
             --severity <LEVEL>   Minimum severity to show: CRITICAL, HIGH, MEDIUM, LOW, INFO (default: INFO)
             --fail-on <LEVEL>    Exit with code 1 if any finding >= this severity (for CI)
-            --output <FILE>      Write report to file (.html or .json)
-            --format <FORMAT>    Output format: text (default) or json
+            --output <FILE>      Write report to file (.html, .json, or .sarif)
+            --format <FORMAT>    Output format: text (default), json, or sarif
+            --baseline <FILE>    Suppress findings already present in this JSON
+                                  baseline (scan-source only) — generate one with
+                                  `scan-source . --format json > baseline.json`
 
         EXAMPLES:
             mcp-safeguard scan config.json
             mcp-safeguard scan config.json --severity HIGH
             mcp-safeguard scan config.json --fail-on CRITICAL
             mcp-safeguard scan config.json --output report.html
+            mcp-safeguard scan config.json --format sarif --output results.sarif
             mcp-safeguard scan examples/demo-vulnerable-config.json
             mcp-safeguard scan-source ./path/to/mcp-server-repo
+            mcp-safeguard scan-source . --baseline baseline.json --fail-on HIGH
+
+        A source-scanned line can also be silenced inline with a comment:
+            # safeguard: ignore[SRC-013] self-signed cert, dev-only client
+
+        CI (GitHub Actions, SARIF -> code scanning):
+            - run: pip install mcp-safeguard
+            - run: mcp-safeguard scan-source . --format sarif --output results.sarif --fail-on HIGH || true
+            - uses: github/codeql-action/upload-sarif@v3
+              with:
+                sarif_file: results.sarif
 
         Config format: Claude Desktop mcpServers JSON or {tools: [...], env: {...}}
 
         `scan` reads a config/tool-definition JSON. `scan-source` walks a
         server's actual source tree for code-level footguns a config scan
-        cannot see (SRC-001..SRC-012: credential handling across redirects,
+        cannot see (SRC-001..SRC-020: credential handling across redirects,
         SQL read-only enforcement, caller-influenced credential destinations,
         unenforced auth flags, unowned resource IDs, syntax-only destructive-
         query classifiers, client-trusted ownership fields, unescaped shell
-        interpolation, unhardened credential file writes, SSRF TOCTOU, and
-        silently-dropped manifest entries). Source-audit findings are
-        heuristic leads to confirm by reading the cited file/line, not proofs.
+        interpolation, unhardened credential file writes, SSRF TOCTOU,
+        silently-dropped manifest entries, disabled TLS verification,
+        unchecked OAuth redirect_uri, inbound-token passthrough, a write
+        flag that gates listing but not execution, a header used as an
+        authorization identity, real path traversal, and unencoded URL
+        query-string building). Source-audit findings are heuristic leads to
+        confirm by reading the cited file/line, not proofs.
 
         GitHub: https://github.com/SyedAnas01/mcp-safeguard
     """))
@@ -431,6 +528,7 @@ def main() -> None:
         fail_on = None
         output = None
         fmt = "text"
+        baseline = None
 
         i = 2
         while i < len(args):
@@ -446,11 +544,14 @@ def main() -> None:
             elif args[i] == "--format" and i + 1 < len(args):
                 fmt = args[i + 1].lower()
                 i += 2
+            elif args[i] == "--baseline" and i + 1 < len(args):
+                baseline = args[i + 1]
+                i += 2
             else:
                 print(f"Warning: unknown option {args[i]}", file=sys.stderr)
                 i += 1
 
-        code = _run_source_scan(root_path, severity, fail_on, output, fmt)
+        code = _run_source_scan(root_path, severity, fail_on, output, fmt, baseline)
         sys.exit(code)
 
     elif args[0] == "version":

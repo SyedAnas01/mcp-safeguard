@@ -40,8 +40,15 @@ def test_allowlisted_host_is_safe():
     assert _is_ssrf_safe("myserver.internal", allowlist=["myserver.internal"]) is True
 
 
-def test_local_suffix_is_safe():
-    assert _is_ssrf_safe("mcp-server.local") is True
+def test_local_suffix_is_not_automatically_safe():
+    """A ".local"/".internal"-suffixed hostname is NOT automatically safe -- it
+    used to be (a bare suffix match bypassed the allowlist entirely), which is
+    exactly the EP-SSRF-001 blind spot this fixed. Such hosts now need explicit
+    allowlisting like any other host."""
+    assert _is_ssrf_safe("mcp-server.local") is False
+    assert _is_ssrf_safe("db.internal") is False
+    # An explicit allowlist entry still works, as always.
+    assert _is_ssrf_safe("mcp-server.local", allowlist=["mcp-server.local"]) is True
 
 
 def test_resolves_to_unsafe_ip_rejects_link_local():
@@ -53,6 +60,15 @@ def test_resolves_to_unsafe_ip_rejects_link_local():
 
 def test_resolves_to_unsafe_ip_allows_loopback():
     assert _resolves_to_unsafe_ip("127.0.0.1") is False
+
+
+def test_resolves_to_unsafe_ip_rejects_full_rfc1918_range():
+    """Previously only checked link-local (169.254.0.0/16) and metadata IPs --
+    a literal RFC1918 address (10.x/172.16.x/192.168.x) resolved via a hostname
+    was NOT caught. Now delegates to the shared, full-range check."""
+    assert _resolves_to_unsafe_ip("10.0.0.5") is True
+    assert _resolves_to_unsafe_ip("172.16.0.5") is True
+    assert _resolves_to_unsafe_ip("192.168.1.1") is True
 
 
 def test_closed_port_returns_false():

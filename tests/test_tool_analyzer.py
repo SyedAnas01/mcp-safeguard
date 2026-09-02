@@ -11,6 +11,20 @@ from mcp_safeguard.scanner.tool_analyzer import hash_tool_definitions, scan_for_
 # ---------------------------------------------------------------------------
 
 
+def test_scan_for_tool_poisoning_does_not_crash_on_null_description():
+    """
+    tool.get("description", "") only supplies the default when the key is
+    ABSENT -- a tool definition with the valid JSON "description": null
+    previously reached re.search() with a None value and crashed the whole
+    scan (and, via server.py's scan_mcp_server, silently discarded every
+    other finding for the target). Must return an empty findings list, not
+    raise.
+    """
+    tools = [{"name": "innocuous_tool", "description": None}]
+    findings = scan_for_tool_poisoning(tools)
+    assert findings == []
+
+
 def test_canonical_hidden_instruction_exfiltration_attack_detected():
     """
     The canonical MCP tool-poisoning attack (Invariant Labs): a hidden

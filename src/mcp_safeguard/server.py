@@ -25,6 +25,8 @@ from mcp_safeguard import __version__
 from mcp_safeguard.config import settings
 from mcp_safeguard.observability.metrics import (
     active_scans,
+    auth_failures,
+    rate_limit_hits,
     record_scan_complete,
     scan_history_size,
 )
@@ -48,6 +50,7 @@ from mcp_safeguard.security.audit_logger import audit_logger
 from mcp_safeguard.security.auth_middleware import authenticate_request
 from mcp_safeguard.security.input_validator import (
     ValidationError,
+    resolves_to_unsafe_ip,
     sanitize_scan_id,
     validate_config_json,
     validate_host,
@@ -152,17 +155,21 @@ async def _fetch_tools_via_mcp(url: str, auth_token: str = "") -> list[dict[str,
         return []
 
 
-def _check_auth() -> dict[str, str] | None:
+def _check_auth() -> tuple[dict[str, str] | None, str]:
     """
     Enforce authentication for network-capable tools when an API key is configured.
 
     Returns:
-        None if the request is authenticated (or no api_key is configured, which
-        preserves open access for local/stdio use). Otherwise an error dict to
-        return immediately from the calling tool.
+        A (error, client_id) pair. If error is not None, the caller must return
+        it immediately. client_id is the caller's real per-credential identity
+        (a stable hash of the presented key) when authenticated, or the
+        configured single-tenant identity when no api_key is set at all — never
+        a static placeholder shared by every distinct caller, which would
+        collapse rate limiting and audit attribution onto one identity in any
+        deployment with more than one API key/consumer.
     """
     if not settings.api_key:
-        return None
+        return None, _client_id_from_env()
 
     # fastmcp strips the Authorization header by default; explicitly include it.
     headers = get_http_headers(include={"authorization"})
@@ -172,8 +179,10 @@ def _check_auth() -> dict[str, str] | None:
         expected_api_key=settings.api_key,
     )
     if not ctx.authenticated:
-        return {"error": "Authentication required."}
-    return None
+        audit_logger.log_auth_failure(ctx.client_id, ctx.auth_method or "unknown")
+        auth_failures.labels(method=ctx.auth_method or "unknown").inc()
+        return {"error": "Authentication required."}, ctx.client_id
+    return None, ctx.client_id
 
 
 if not settings.api_key:
@@ -181,6 +190,21 @@ if not settings.api_key:
         "mcp-safeguard is running without an API key configured — all tools are "
         "accessible without authentication. Set MCP_SAFEGUARD_API_KEY to require auth."
     )
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def _health(request):  # noqa: ARG001 - Starlette Request, unused by design
+    """
+    Liveness endpoint for container/orchestrator health checks.
+
+    The Dockerfile's HEALTHCHECK previously probed this exact path, but no
+    route registered it -- every probe silently got FastMCP's default 404 and,
+    because the check script didn't call raise_for_status(), was reported
+    healthy anyway. This route exists so the check is actually meaningful.
+    """
+    from starlette.responses import JSONResponse
+
+    return JSONResponse({"status": "ok", "version": __version__})
 
 
 # ---------------------------------------------------------------------------
@@ -203,20 +227,38 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
     Returns:
         Structured security report as a dict, including summary and all findings.
     """
-    if (e := _check_auth()) is not None:
-        return e
-
-    client_id = _client_id_from_env()
+    err, client_id = _check_auth()
+    if err is not None:
+        return err
 
     if not _rate_limiter.is_allowed(client_id):
         audit_logger.log_rate_limit(client_id, "scan_mcp_server")
+        rate_limit_hits.labels(client_id=client_id).inc()
         return {"error": "Rate limit exceeded. Please wait before scanning again."}
 
-    # Validate URL
+    # Validate URL, then resolve its host and reject anything that lands on a
+    # private/reserved or cloud-metadata address. validate_url() alone only
+    # catches a LITERAL IP in that range (its own docstring notes hostname
+    # resolution "happens at scan time") -- without this second check here, a
+    # caller-supplied hostname that resolves to an internal/metadata address
+    # would reach _fetch_tools_via_mcp/the httpx fallback below completely
+    # unguarded, with any caller-supplied auth_token attached as a bearer
+    # header. This is the same SSRF/DNS-rebinding class the tool itself exists
+    # to detect in other servers (see EP-SSRF-001), so it must not be missing
+    # from the scanner's own outbound requests.
     try:
+        from urllib.parse import urlparse
+
         from mcp_safeguard.security.input_validator import validate_url
 
         validate_url(url)
+        target_host = urlparse(url).hostname or ""
+        if target_host and resolves_to_unsafe_ip(target_host):
+            audit_logger.log_ssrf_blocked(client_id, url)
+            raise ValidationError(
+                f"SSRF blocked: '{target_host}' resolves to a private/reserved "
+                "or cloud-metadata address."
+            )
     except ValidationError as e:
         audit_logger.log_validation_error(client_id, "url", str(e))
         return {"error": f"Invalid scan target: {e}"}
@@ -246,7 +288,10 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
             async with httpx.AsyncClient(
                 timeout=settings.max_scan_timeout,
                 headers=headers,
-                verify=False,
+                # safeguard: ignore[SRC-013] verify defaults to True; only
+                # False if an operator explicitly opts out via settings, since
+                # this request carries the caller's real auth_token.
+                verify=settings.verify_scan_target_tls,
             ) as client:
                 try:
                     resp = await client.get(f"{url}/tools")
@@ -387,12 +432,13 @@ async def scan_tool_definitions(tool_json: str) -> dict[str, Any]:
     Returns:
         Dict with injection_findings, tool_risk_profiles, and summary.
     """
-    if (e := _check_auth()) is not None:
-        return e
-
-    client_id = _client_id_from_env()
+    err, client_id = _check_auth()
+    if err is not None:
+        return err
 
     if not _rate_limiter.is_allowed(client_id):
+        audit_logger.log_rate_limit(client_id, "scan_tool_definitions")
+        rate_limit_hits.labels(client_id=client_id).inc()
         return {"error": "Rate limit exceeded."}
 
     try:
@@ -469,12 +515,13 @@ async def check_auth_config(config_json: str) -> dict[str, Any]:
     Returns:
         Dict with credential_findings, oauth_findings, and a risk summary.
     """
-    if (e := _check_auth()) is not None:
-        return e
-
-    client_id = _client_id_from_env()
+    err, client_id = _check_auth()
+    if err is not None:
+        return err
 
     if not _rate_limiter.is_allowed(client_id):
+        audit_logger.log_rate_limit(client_id, "check_auth_config")
+        rate_limit_hits.labels(client_id=client_id).inc()
         return {"error": "Rate limit exceeded."}
 
     try:
@@ -544,12 +591,13 @@ async def check_endpoint_exposure(host: str, port: int = 8000) -> dict[str, Any]
     Returns:
         Dict with endpoint_findings and open_ports.
     """
-    if (e := _check_auth()) is not None:
-        return e
-
-    client_id = _client_id_from_env()
+    err, client_id = _check_auth()
+    if err is not None:
+        return err
 
     if not _rate_limiter.is_allowed(client_id):
+        audit_logger.log_rate_limit(client_id, "check_endpoint_exposure")
+        rate_limit_hits.labels(client_id=client_id).inc()
         return {"error": "Rate limit exceeded."}
 
     try:
@@ -604,8 +652,9 @@ async def generate_security_report(scan_id: str, format: str = "json") -> dict[s
     Returns:
         The full report in the requested format.
     """
-    if (e := _check_auth()) is not None:
-        return e
+    err, _client_id = _check_auth()
+    if err is not None:
+        return err
 
     try:
         validated_id = sanitize_scan_id(scan_id)
@@ -656,8 +705,9 @@ async def get_scan_history() -> dict[str, Any]:
     Returns:
         Dict with a list of scan summaries, sorted by recency.
     """
-    if (e := _check_auth()) is not None:
-        return e
+    err, _client_id = _check_auth()
+    if err is not None:
+        return err
 
     history = []
     for scan_id, report in reversed(list(_scan_history.items())):
@@ -693,8 +743,9 @@ async def compare_scans(scan_id_1: str, scan_id_2: str) -> dict[str, Any]:
     Returns:
         Diff showing new findings, resolved findings, and score changes.
     """
-    if (e := _check_auth()) is not None:
-        return e
+    err, _client_id = _check_auth()
+    if err is not None:
+        return err
 
     try:
         id1 = sanitize_scan_id(scan_id_1)
@@ -798,9 +849,15 @@ async def get_report_resource(scan_id: str) -> str:
 @mcp.resource("security://rules")
 async def get_rules_resource() -> str:
     """All active detection rules across all scanner modules."""
-    from mcp_safeguard.scanner.credential_scanner import _CREDENTIAL_PATTERNS, _OAUTH_SCOPE_RISKS
+    from mcp_safeguard.scanner.credential_scanner import (
+        _CREDENTIAL_PATTERNS,
+        _OAUTH_SCOPE_RISKS,
+        _SENSITIVE_ENV_NAMES,
+    )
     from mcp_safeguard.scanner.endpoint_scanner import _DANGEROUS_PORTS, _SENSITIVE_PATHS
     from mcp_safeguard.scanner.prompt_injection import _INJECTION_PATTERNS, _SCHEMA_RISK_PATTERNS
+    from mcp_safeguard.scanner.source_scanner import RULE_IDS as _SOURCE_RULE_IDS
+    from mcp_safeguard.scanner.ssrf_scanner import RULE_IDS as _SSRF_RULE_IDS
     from mcp_safeguard.scanner.tool_analyzer import _POISONING_PATTERNS
 
     rules = {
@@ -815,6 +872,10 @@ async def get_rules_resource() -> str:
         "credentials": [
             {"rule_id": r[2], "severity": r[1].value, "title": r[3], "cvss": r[4]}
             for r in _CREDENTIAL_PATTERNS
+        ]
+        + [
+            {"rule_id": r[1], "severity": "HIGH", "title": r[2], "cvss": r[3]}
+            for r in _SENSITIVE_ENV_NAMES
         ],
         "oauth_scopes": [
             {"rule_id": r[2], "severity": r[1].value, "title": r[3], "cvss": r[4]}
@@ -832,7 +893,13 @@ async def get_rules_resource() -> str:
             {"rule_id": r[2], "severity": r[1].value, "title": r[3], "cvss": r[4]}
             for r in _POISONING_PATTERNS
         ],
+        "ssrf": [{"rule_id": r[0], "title": r[1]} for r in _SSRF_RULE_IDS],
+        "source_audit": [{"rule_id": r[0], "title": r[1]} for r in _SOURCE_RULE_IDS],
     }
+    # This resource previously omitted the ssrf and source_audit categories
+    # entirely, so total_rules undercounted by 20 (3 SSRF + 17 source-audit)
+    # rules -- exactly the kind of drift a hardcoded prose number in README.md
+    # can't catch but this live, code-derived count always reflects.
     total = sum(len(v) for v in rules.values())
     rules["_meta"] = {"total_rules": total, "version": __version__}
     return json.dumps(rules, indent=2)

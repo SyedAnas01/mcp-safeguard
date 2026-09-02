@@ -50,6 +50,16 @@ class Settings(BaseSettings):
         default=50_000,
         description="Max characters to accept in tool JSON input",
     )
+    verify_scan_target_tls: bool = Field(
+        default=True,
+        description=(
+            "Verify TLS certificates when connecting to a scan target. The "
+            "tool-fetch path sends the caller's auth_token to that target, so "
+            "this defaults to secure. Set to false only to scan a target with "
+            "a self-signed/internal cert you already trust -- never in "
+            "production against untrusted targets."
+        ),
+    )
 
 
 settings = Settings()

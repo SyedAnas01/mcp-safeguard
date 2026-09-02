@@ -102,7 +102,7 @@ Four attack surfaces mcp-safeguard covers:
 | Risk | Rules | What it detects |
 |------|-------|----------------|
 | **Prompt Injection** | PI-001–PI-015 (15) | Instruction overrides, jailbreak phrases, exfiltration commands, identity hijacking, zero-width steganography |
-| **Credential Leaks** | CRED-001–025 (25) | AWS keys, Anthropic/OpenAI tokens, GitHub PATs, Stripe keys, JWTs, database URLs, hardcoded passwords |
+| **Credential Leaks** | CRED-001–028 (31) | AWS keys, Anthropic/OpenAI tokens, GitHub PATs, Stripe keys, JWTs, database URLs, hardcoded passwords, plus name-based detection for Twilio/SendGrid/Slack/HuggingFace/Replicate/Cohere env vars |
 | **Endpoint Exposure** | EP-001–013, EP-PORT-001–012, EP-RESP-001–005, EP-SSRF-001 (31) | `/admin`, `/.env`, `/debug`, `/actuator`, dangerous open ports, response-body credential leaks, AWS/GCP metadata endpoints |
 | **Tool Poisoning** | TP-001–TP-011 (11) | Side-effect exfiltration, external URL calls, safety override instructions, hidden instruction tags, conceal-from-user directives, read-then-exfiltrate patterns |
 | **SSRF Detection** | SS-001–SS-003 (3) | URL parameters without allowlist/blocklist protection, blind URL fetch descriptors, redirect-following without revalidation |
@@ -187,6 +187,14 @@ mcp-safeguard scan-source . --severity HIGH --fail-on HIGH
 | SRC-010 | A credential/key file is written with no permission hardening, while the same repo hardens permissions on other file writes |
 | SRC-011 | An SSRF guard validates a resolved IP once, but the actual outbound call re-resolves the original URL string (DNS-rebinding TOCTOU) |
 | SRC-012 | A manifest/lockfile parser silently drops sentinel-valued entries with only debug-level logging before the list reaches a security consumer |
+| SRC-013 | TLS certificate verification explicitly disabled (`verify=False`, `ssl.CERT_NONE`, `rejectUnauthorized: false`, `InsecureSkipVerify`, ...) |
+| SRC-014 | An OAuth `redirect_uri` is read from the request and used in a redirect response with no allowlist/registration comparison in between (authorization-code interception) |
+| SRC-015 | The inbound `Authorization` header is captured and re-forwarded as an outbound request's own header (token passthrough) |
+| SRC-016 | A write/destructive-capability flag gates only the tool-list response, with no matching gate anywhere near the tool-call dispatcher — hides discovery, not execution |
+| SRC-017 | An HTTP header value is used directly as an authorization/tenant-scoping identity, with no authentication-check call anywhere in the file |
+| SRC-018 | A path is built by joining a base directory with a request/argument-derived value and used in a file operation, with no realpath+containment check in between |
+| SRC-019 | Unescaped shell interpolation, same shape as SRC-009 but without requiring repo-wide corroboration — broader recall |
+| SRC-020 | A value is interpolated into a URL query string with no proper encoder (the statically-detectable root cause behind HTTP Parameter Pollution) |
 
 This mode is heuristic (regex/text-proximity over source, not a type-aware or
 dataflow analysis): findings are leads to confirm by reading the cited file and
@@ -202,6 +210,15 @@ finding here — treat those two as the least reliable of the eight.
 It was validated against the published source of 14 official vendor MCP
 servers (Microsoft, Amazon, Google, GitHub, and others), correctly
 identifying the target pattern in 9 of 10 known instances.
+
+SRC-013 through SRC-017 were added after this project's own coordinated-
+disclosure work against live, real-world MCP servers turned up the same
+handful of bug shapes repeatedly across unrelated codebases — SRC-014's
+`redirect_uri` pattern in particular is the single most common real
+vulnerability that campaign found, including in confirmed government MCP
+infrastructure. SRC-016 uses the same non-overclaiming discipline as SRC-007,
+in reverse: it only fires when the write-gating flag is found inside the
+tool-list function and confirmed absent everywhere else in the file.
 
 ### Connect to Claude Desktop
 
@@ -363,16 +380,33 @@ Output:
 
 ## Detection Coverage
 
-**66 core detection rules** across five categories — prompt injection (15) + credentials (25) + tool poisoning (11) + SSRF (3) + source-audit (12) — plus 29 endpoint path probes, 12 dangerous-port checks, and 5 response-body leak escalation rules.
+**132 detection rules** across seven categories — prompt injection (15 + 4 schema-risk) + credentials (31) + tool poisoning (11) + SSRF (3) + source-audit (20) + endpoint exposure (29 paths + 12 ports + 5 response-leak escalations) + OAuth scope risks (7). This count is generated from the code itself (the `security://rules` MCP resource sums every active pattern list at call time) rather than hand-maintained here, specifically so this table can't go stale the way earlier versions of it did — query that resource for the live, authoritative number.
 
 | Category | Rules | Patterns |
 |----------|-------|---------|
-| Prompt Injection | 15 rules (PI-001–015) | Instruction overrides, jailbreak, exfiltration, identity hijack, steganography |
-| Credential Leaks | 25 patterns (CRED-001–025) | AWS, Anthropic, OpenAI, GitHub, Stripe, JWT, DB URLs, generic passwords |
+| Prompt Injection | 15 rules (PI-001–015) + 4 schema-risk (PI-SCH-001–004) | Instruction overrides, jailbreak, exfiltration, identity hijack, steganography |
+| Credential Leaks | 31 rules (CRED-001–028) | AWS, Anthropic, OpenAI, GitHub, Stripe, JWT, DB URLs, generic passwords, plus name-based detection for Twilio/SendGrid/Slack/HuggingFace/Replicate/Cohere |
 | Endpoint Exposure | 29 paths + 12 ports + 5 response-leak escalations | Admin panels, debug routes, metadata services, dev ports, credential leaks in response bodies |
 | Tool Poisoning | 11 patterns (TP-001–011) | Side-effect exfil, external calls, safety overrides, hidden instruction tags, conceal-from-user directives, read-then-exfiltrate patterns |
 | SSRF Detection | 3 rules (SS-001–003) | URL params without allowlist/blocklist protection, blind URL fetch descriptors, redirect-following without revalidation |
-| Source Audit | 12 rules (SRC-001–012) | Credential re-applied across a cross-host redirect (Go and Python), read-only enforced by string check alone, credential attached to a caller-influenced destination host, unenforced auth flags, unowned resource IDs keying shared state, syntax-only destructive-query classifiers, client-trusted ownership fields, unescaped shell interpolation, unhardened credential file writes, SSRF TOCTOU, and silently-dropped manifest entries. Scans the server's source tree, not a config file — see `scan-source` above |
+| OAuth Scope Risk | 7 rules (OAUTH-001–007) | Overly-broad/write/delete/sudo/offline_access/PII-exposing OAuth scopes |
+| Source Audit | 20 rules (SRC-001–020) | Credential re-applied across a cross-host redirect, read-only enforced by string check alone, credential attached to a caller-influenced host, unenforced auth flags, unowned resource IDs keying shared state, syntax-only destructive-query classifiers, client-trusted ownership fields, unescaped shell interpolation, unhardened credential file writes, SSRF TOCTOU, silently-dropped manifest entries, disabled TLS verification, unchecked OAuth redirect_uri before a redirect, inbound-token passthrough to an outbound request, a write-capability flag that gates tool listing but not tool execution, a header value used as an authorization identity with no authentication check, real path traversal via a joined-path containment check, broader (no-repo-signal-required) shell injection, and unencoded URL query-string building. Scans the server's source tree, not a config file — see `scan-source` above |
+
+### Benchmarked against real, confirmed vulnerabilities — not just unit tests
+
+`tests/test_benchmark_confirmed_vulnerable.py` scans fixtures reproduced
+(with attribution, under their original MIT license) from actual MCP servers
+this project independently found and disclosed vulnerable, and asserts the
+right rule fires at the right file:line and severity. This matters because
+several rules looked correct against a hand-written synthetic test but
+missed (or, in one case, falsely flagged) the real vulnerable code on first
+contact — real code has indirection through helper functions, multi-line
+calls, and surrounding logic a clean unit-test fixture doesn't. Every rule
+in this suite is fixed against what actually broke, not just re-tested
+against its own synthetic case. This benchmark is small today (one committed
+fixture, license-permitting; a few more validated during development but not
+committed due to unclear source licensing) and is meant to grow — see
+CONTRIBUTING.md before adding a rule derived from a real finding.
 
 ---
 

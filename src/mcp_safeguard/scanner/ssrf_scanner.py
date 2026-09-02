@@ -23,6 +23,13 @@ from typing import Any
 
 from .prompt_injection import Severity
 
+# Rule catalog for introspection (security://rules resource, docs generation).
+RULE_IDS: list[tuple[str, str]] = [
+    ("SS-001", "Unconstrained URL parameter with no allowlist/blocklist"),
+    ("SS-002", "Redirect-following URL fetch with no revalidation"),
+    ("SS-003", "Missing scheme restriction on a URL-fetching tool"),
+]
+
 
 @dataclass
 class SSRFFinding:

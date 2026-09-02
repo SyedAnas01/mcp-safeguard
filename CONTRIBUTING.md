@@ -43,6 +43,29 @@ The CI pipeline enforces both. Fix all issues before submitting.
 4. Write at least two test cases: one that triggers the rule, one that confirms clean input passes
 5. Document the rule in the PR description
 
+**If the rule is derived from a real, confirmed vulnerability** (the strongest
+kind — see the SRC-013..020 comments in `source_scanner.py` for the pattern),
+also test it against the *actual* vulnerable code, not only your synthetic
+fixture, before opening the PR. Several rules in this codebase looked correct
+against a hand-written test but missed (or falsely flagged) the real thing on
+first contact — real code has indirection, multi-line calls, and surrounding
+logic a clean synthetic fixture doesn't exercise. If the source is
+permissively licensed (MIT/Apache/BSD) and you can attribute it (repo, exact
+commit, license, one line on the real disclosed finding), add a minimal
+excerpt under `tests/fixtures/confirmed_vulnerable/<name>/` and a test in
+`tests/test_benchmark_confirmed_vulnerable.py` following the existing example
+— this is the project's real-world benchmark corpus, and it's meant to grow
+with every rule that comes from an actual finding.
+
+**Rules in `source_scanner.py` (SRC-*) don't use a flat `_PATTERNS` list** —
+each is its own regex + a short block of matching logic (see any `SRC-0XX:`
+comment there for the pattern), since several need multi-step control flow
+(e.g. SRC-016 checks a flag is present in one function and absent elsewhere
+in the file) that a flat pattern tuple can't express. Add your rule's ID and
+title to the `RULE_IDS` list at the top of the file too — that's what makes
+it show up in the `security://rules` resource and the doc-count totals, so
+skipping it means the rule works but is invisible to introspection.
+
 ## Adding a New Tool
 
 1. Add the tool function to `src/mcp_safeguard/server.py` decorated with `@mcp.tool`

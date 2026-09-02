@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-safeguard"
-version = "0.5.0"
+version = "0.6.0"
 description = "Security scanner for MCP servers — detect prompt injection, credential leaks, exposed endpoints, tool poisoning, and source-level credential-handling flaws"
 readme = "README.md"
 license = { text = "MIT" }
@@ -84,6 +84,10 @@ target-version = ["py311", "py312"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Real-world third-party code reproduced verbatim (with attribution) as a
+# benchmark fixture -- see tests/fixtures/confirmed_vulnerable/*/README or the
+# fixture file's own header comment. Not our code style; not linted.
+exclude = ["tests/fixtures/confirmed_vulnerable"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4"]
