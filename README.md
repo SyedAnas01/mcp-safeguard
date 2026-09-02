@@ -7,10 +7,10 @@
 
 Detect prompt injection · credential leaks · exposed endpoints · tool poisoning
 
-> 🔎 **Found [CVE-2026-14540](https://github.com/googleapis/genai-toolbox/pull/3448) — a server-side request forgery in Google's official MCP Toolbox. Google shipped the fix and credited the report.**
+> 🔎 **Found [CVE-2026-14540](https://github.com/googleapis/mcp-toolbox/pull/3448) — a server-side request forgery in Google's official MCP Toolbox. Google shipped the fix and credited the report.**
 
 [![PyPI version](https://badge.fury.io/py/mcp-safeguard.svg)](https://pypi.org/project/mcp-safeguard/)
-[![Found CVE-2026-14540 in Google's MCP Toolbox](https://img.shields.io/badge/found-CVE--2026--14540-critical)](https://github.com/googleapis/genai-toolbox/pull/3448)
+[![Found CVE-2026-14540 in Google's MCP Toolbox](https://img.shields.io/badge/found-CVE--2026--14540-critical)](https://github.com/googleapis/mcp-toolbox/pull/3448)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20502474.svg)](https://doi.org/10.5281/zenodo.20502474)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -467,21 +467,14 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 
 ## Project Resources & Standards Work
 
-### 📰 Press & Community
+### 📰 Community & Standards
 - **[Hacker News](https://news.ycombinator.com/item?id=48242541)** — "MCP-safeguard: Security scanner for MCP servers" (2026-05-22)
 - **[IETF Internet-Draft](https://datatracker.ietf.org/doc/draft-mohiuddin-mcp-security-considerations/)** — draft-mohiuddin-mcp-security-considerations-00, security considerations for the Model Context Protocol
 - **OWASP MCP Top 10** — Open PR adding an SSRF prevention/detection recommended control ([PR #42](https://github.com/OWASP/www-project-mcp-top-10/pull/42), under review)
 
-### 🔒 Real-World Fix Credited
-- **googleapis/mcp-toolbox** — SSRF via redirect chain (CWE-918, fix in [PR #3448](https://github.com/googleapis/mcp-toolbox/pull/3448), reported by Syed Anas Mohiuddin)
-
-### 📋 Awesome Lists PRs Open
-- [awesome-python](https://github.com/vinta/awesome-python) (299K ⭐)
-- [awesome-llm-security](https://github.com/corca-ai/awesome-llm-security)
-- [awesome-security](https://github.com/sbilly/awesome-security)
-- [Prompt-Engineering-Guide](https://github.com/dair-ai/Prompt-Engineering-Guide) (74K ⭐)
-- [the-book-of-secret-knowledge](https://github.com/trimstray/the-book-of-secret-knowledge)
-- And 9 more awesome lists
+### 🔒 Real-World Fixes Credited
+- **googleapis/mcp-toolbox** — SSRF via redirect chain (CWE-918, fix in [PR #3448](https://github.com/googleapis/mcp-toolbox/pull/3448), reported by Syed Anas Mohiuddin) — credited with [CVE-2026-14540](https://www.cve.org/CVERecord?id=CVE-2026-14540)
+- **github/github-mcp-server** — GitHub token was attached to requests regardless of destination host; fix in [PR #3056](https://github.com/github/github-mcp-server/pull/3056), merged 2026-08-18, authored by Syed Anas Mohiuddin
 
 Using mcp-safeguard in your pipeline, or found a real issue with it? We welcome scan results and contributions — open a [Discussion](https://github.com/SyedAnas01/mcp-safeguard/discussions) or PR.
 
