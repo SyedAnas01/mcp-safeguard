@@ -99,6 +99,19 @@ def test_validate_tool_json_rejects_oversized():
         validate_tool_json("x" * 60_000, max_length=50_000)
 
 
+def test_validate_tool_json_rejects_non_string_description():
+    # Fable adversarial review, 2026-09-02 (M4): well-formed JSON with a
+    # wrong-typed field used to pass validation and crash downstream in
+    # analyze_tool_risk() instead of being rejected cleanly here.
+    with pytest.raises(ValidationError, match="description"):
+        validate_tool_json(json.dumps([{"name": "t", "description": 12345}]))
+
+
+def test_validate_tool_json_rejects_non_dict_input_schema():
+    with pytest.raises(ValidationError, match="inputSchema"):
+        validate_tool_json(json.dumps([{"name": "t", "inputSchema": "not-a-dict"}]))
+
+
 def test_validate_config_json_valid():
     config = {"command": "python", "args": ["-m", "server"]}
     result = validate_config_json(json.dumps(config))
@@ -380,3 +393,30 @@ async def test_check_auth_returns_real_client_id_when_authenticated(monkeypatch)
     )
     assert client_id == expected_ctx.client_id
     assert client_id != "local"  # must not fall back to the static env placeholder
+
+
+def test_cap_string_fields_truncates_oversized_description():
+    """
+    Fable adversarial review, 2026-09-02 (H2): the network-fetch paths
+    (_fetch_tools_via_mcp / the httpx /tools fallback) had no size limit on
+    what a scan target could return, unlike the scan_tool_definitions MCP
+    tool (which enforces settings.max_tool_descriptions_length via
+    validate_tool_json). _cap_string_fields closes that gap.
+    """
+    from mcp_safeguard.server import _cap_string_fields
+
+    tool = {"name": "t", "description": "A" * 100_000, "inputSchema": {"type": "object"}}
+    capped = _cap_string_fields(tool, max_length=50_000)
+    assert len(capped["description"]) == 50_000
+    assert capped["name"] == "t"  # short strings pass through unchanged
+
+
+def test_cap_string_fields_recurses_into_nested_schema():
+    from mcp_safeguard.server import _cap_string_fields
+
+    tool = {
+        "name": "t",
+        "inputSchema": {"properties": {"x": {"description": "B" * 100_000}}},
+    }
+    capped = _cap_string_fields(tool, max_length=50_000)
+    assert len(capped["inputSchema"]["properties"]["x"]["description"]) == 50_000

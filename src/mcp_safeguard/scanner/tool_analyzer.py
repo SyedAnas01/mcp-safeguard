@@ -180,7 +180,16 @@ def analyze_tool_risk(tool: dict[str, Any]) -> ToolRiskProfile:
     """
     tool_name = tool.get("name", "<unnamed>")
     description = tool.get("description", "")
+    if not isinstance(description, str):
+        description = ""
     input_schema = tool.get("inputSchema", {})
+    if not isinstance(input_schema, dict):
+        # A tool fetched from a scan target over the network (scan_mcp_server)
+        # doesn't go through validate_tool_json's type checks, so a malformed
+        # or hostile target response can still reach here with a wrong-typed
+        # inputSchema -- coerce rather than crash. See validate_tool_json's
+        # matching check for the direct-input path.
+        input_schema = {}
     parameters = input_schema.get("properties", {})
 
     blast_radius = 0.0

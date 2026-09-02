@@ -2,6 +2,162 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.7.1] - 2026-09-02
+
+### Fixed — adversarial self-review of mcp-safeguard's own code
+
+0.7.0 hardened the tool's ability to *find* vulnerabilities in other MCP servers. This release
+turns the same scrutiny on the tool itself: an independent adversarial pass whose only job was to
+break mcp-safeguard's own SSRF guards, its own regex scanning, its own input handling — poke holes,
+not review the design. Five real, verified findings came back; a sixth and seventh were found while
+fixing the first. All seven are fixed, each with a working proof-of-concept confirming the bug
+before the fix and confirming it's closed after, plus a regression test.
+
+- **CRITICAL — IPv4-mapped/6to4 IPv6 SSRF bypass.** The private/reserved/metadata IP check
+  (`input_validator.py`) matched an IPv6 address like `::ffff:169.254.169.254` against IPv6-only
+  ranges, found no match, and allowed it — but a dual-stack socket resolves and connects that
+  address to the real IPv4 `169.254.169.254` (the AWS/GCP metadata endpoint) underneath. Same blind
+  spot for 6to4-encoded (`2002::/16`) addresses. Fixed with a new `_is_unsafe_ip()` helper that
+  unwraps both forms to their real IPv4 address *before* checking, built on `ipaddress`'s own
+  `.ipv4_mapped`/`.sixtofour` properties instead of hand-rolled range math. Loopback stays
+  intentionally exempt (documented allowance for local MCP server testing). PoC: `http://[::ffff:
+  169.254.169.254]/`, `http://[::ffff:10.0.0.5]/`, and `http://[2002:a9fe:a9fe::]/` (169.254.169.254
+  in 6to4 form) were all previously **allowed**; all three are now **blocked**. `::ffff:127.0.0.1`
+  correctly stays allowed.
+- **Bonus, found while fixing the above — `validate_host()` never actually blocked private IPs.**
+  `ValidationError` subclasses `ValueError`, so `raise ValidationError(...)` inside a `try` block
+  immediately followed by `except ValueError:` was being silently caught by that same except clause
+  and swallowed, falling through to hostname-format validation — which a dotted-decimal IP string
+  passes fine. This function had never actually enforced its own private-IP block on any literal-IP
+  input, in any released version. Fixed with the same `try/except/else` structure already used in
+  `validate_url()`. PoC: `validate_host("192.168.1.1")` was previously **allowed**; now **blocked**.
+- **HIGH — quadratic ReDoS in the `PI-005` prompt-injection regex, plus unbounded fetched-data
+  size.** `PI-005`'s hidden-instruction-tag pattern used an unbounded `.*?` gap under `re.DOTALL`
+  between an opening and closing tag; on adversarial input (many unclosed opening tags, no closing
+  tag anywhere) this is quadratic — measured **6.0s on 624K characters** for the old pattern vs.
+  **0.01s** for the fix (~550x), and the old pattern's cost only grows worse with input size. Fixed
+  by bounding the gap to 500 characters, which real hidden-tag pairs never exceed. Separately, the
+  two paths that fetch tool definitions over the network from a scan target
+  (`_fetch_tools_via_mcp`, the httpx `/tools` fallback) had **no size limit at all** on what a target
+  could return — unlike the `scan_tool_definitions` MCP tool, which already caps pasted JSON via
+  `max_tool_descriptions_length`. A malicious or compromised scan target could return an
+  arbitrarily large description and force every injection pattern to scan it in full, regardless of
+  the regex fix. Closed with a new `_cap_string_fields()` helper applied to every tool definition
+  fetched over the network, capping every string field (recursively, including nested schema
+  strings) to the same limit the direct-paste path already enforces.
+- **HIGH — 55 real Dependabot alerts**, including a documented HTTP-transport auth-bypass CVE in
+  the pinned `mcp` SDK version. `uv.lock` had `mcp` pinned at `1.27.1`; bumped to `1.29.1` via `uv
+  lock --upgrade-package` (proper dependency-graph resolution, not a hand-edited lock file) along
+  with `starlette` (1.0.0 → 1.6.0), `pyjwt` (2.12.1 → 2.13.0), `joserfc` (1.6.5 → 1.7.5),
+  `cryptography` (48.0.0 → 50.0.1), `python-multipart` (0.0.29 → 0.0.32), and `pydantic-settings`
+  (2.14.1 → 2.15.0). Full test suite re-run against the actual bumped, locked versions (not just the
+  ambient dev environment) — 205/205 passing, no breaking changes.
+- **MEDIUM — missing type validation in `validate_tool_json`, and a second uncaught crash it didn't
+  cover.** Well-formed JSON with a wrong-typed field (`description` as a number, `inputSchema` as a
+  string) passed `validate_tool_json`'s checks (which only verified `isinstance(item, dict)` and the
+  presence of `name`) and then crashed downstream in `analyze_tool_risk()` with an uncaught
+  `AttributeError` — first on `input_schema.get(...)` when `inputSchema` wasn't a dict, and (found
+  while writing the PoC) a **second, separate crash** on `description.strip()` when `description`
+  wasn't a string. Fixed at both layers: `validate_tool_json` now rejects non-string `description`
+  and non-dict `inputSchema` with a clear `ValidationError` instead of a stack trace, and
+  `analyze_tool_risk()` itself now coerces (rather than crashes on) wrong-typed input as
+  defense-in-depth — it's also reachable from `scan_mcp_server`'s network-fetch path, which doesn't
+  go through `validate_tool_json` at all, since that data comes from the scan target, not a caller.
+- **MEDIUM — uncaught `RecursionError` on deeply nested JSON.** `~10,000` levels of `[[[...]]]` or
+  `{"a":{"a":...}}` nesting fits in about 60KB — comfortably under both `validate_tool_json`'s and
+  `validate_config_json`'s default character-length caps — while still exhausting Python's call
+  stack inside the JSON decoder and raising an uncaught `RecursionError`. Both functions now catch
+  it and raise a clean `ValidationError` instead.
+
+23 new regression tests added across `test_input_validator.py` (new file), `test_prompt_injection.py`,
+`test_server.py`, and `test_tool_analyzer.py` — one confirming each bug's PoC stays fixed. 211 tests
+passing (up from 188), ruff clean, self-scan of the tool's own source stays clean after every change.
+No rule count change (these are validator/scanner-internals fixes, not new detection rules) — still
+142 rules via `security://rules`.
+
+## [0.7.0] - 2026-09-02
+
+### Added — 9 more source-audit rules (`SRC-022`..`SRC-030`), mined from the full disclosure campaign backlog
+
+Every rule added tonight so far (`SRC-013`..`SRC-021`) came from Round 30's fresh findings. This
+release goes back through the *entire* campaign — 81 report files across every round — and turns
+the remaining un-generalized real bug classes into rules, using nine parallel agents each held to
+the same standard: derive the pattern from a real, already-confirmed finding, then actually run it
+against the real vulnerable code (not a synthetic fixture) before calling it done.
+
+**Every one of the nine initially got something wrong when checked against real code, and every one
+was fixed before integration** — this is the expected cost of doing this properly, not a failure:
+
+- `SRC-022` (SQL/SoQL injection) — the obvious first design (require `execute()` to directly wrap
+  the interpolated string) matched *neither* real source finding it was derived from: both
+  apple-health-mcp-server and cdc-places-mcp-server build the unsafe query fragment in one place and
+  execute it in another. Redesigned around the actual structural signal (a comparison operator
+  directly followed by a quoted, interpolated value) and re-verified against both real files.
+- `SRC-014` and `SRC-017` (from earlier tonight) were also revisited and fixed here as part of the
+  same integration pass — see their own entries below.
+- `SRC-023` (unguarded outbound SSRF) — verified 3 of 4 real findings fire; the fourth (Inkeep
+  agents) documents its vulnerable call chain by file:line/prose only, with no literal fetch-call
+  code fence to regex-match, and is noted as uncovered rather than silently claimed.
+- `SRC-024` (BOLA/missing resource-scope check) — shipped with an explicit lower-confidence label:
+  it cannot recognize non-Python/TS handler shapes (confirmed: silent on a real C# finding it was
+  also derived from), and a generic `authorize()`/`[Authorize]` call will suppress it even when that
+  check never verifies ownership of the *specific* resource. Documented, not hidden.
+- `SRC-025` (reflected XSS) — the interpolation-to-HTML-tag lookback window was first set too tight
+  (measured against the real IBKR source: only an ~80-character margin) and widened before integration.
+- `SRC-026` (loopback/Origin, DNS rebinding) — the first line-scoped version missed a real finding
+  because the vulnerable assignment and the `"127.0.0.1"` literal it resolves to sit on different
+  lines; widened to a cross-line window and re-verified. Also includes a bonus sub-case: an Origin
+  check that exists but uses an unanchored wildcard regex (a real finding, fast-mcp), so a substring
+  match like `evilexample.com` passes a check meant for `example.com`.
+- `SRC-027` (OAuth scope, no role check) — a literal find/replace of `SRC-014`'s pattern (swap
+  `redirect_uri` for `scope`) matched nothing against the real mcp-construction source, which reads
+  `scope` via a framework context call and bracket notation, not the dotted-property shape
+  `SRC-014` assumes. Both real shapes added and re-verified.
+- `SRC-028` (unredacted error/PII logging) — an initial fixed-width forward window swept a
+  *different*, safe, adjacent log line into the same finding, misattributing the location. Bounded
+  to the rest of the offending line only, the same discipline `SRC-005`/`SRC-012` already use.
+- `SRC-029` (plaintext credential persistence) — ships with a documented single-hop limitation
+  (shared with `SRC-004`/`010`): the static-vs-runtime-origin check only inspects the immediate
+  assignment, not a value routed through an intermediate variable first.
+- `SRC-030` (CORS wildcard / disabled dev-server host check) — an unrelated word-boundary bug in the
+  wildcard-quote alternative silently failed to match `origin: "*"` (a `\b` cannot match between two
+  non-word characters) while still matching `origin: true`; fixed and re-verified against both forms.
+
+### Fixed — issues surfaced only by integrating all nine together and re-running the tool on its own source
+Dogfooding the finished tool against its own codebase (routine practice all through this hardening
+pass) turned up real problems invisible to any single rule's isolated testing:
+- 11 **self-referential false positives** — new rules' own doc comments and user-facing finding-text
+  necessarily *describe* the patterns they detect, and several rules' example text (`= '{value}'`,
+  `cors()`, `allowedHosts: true`, an `http://localhost:8000` docstring example) matched their own
+  detection regex when the tool scanned its own source. Reworded every instance to describe the
+  pattern without literally reproducing the trigger substring — same fix already applied to `SRC-013`
+  earlier tonight, now applied consistently.
+- **A real, pre-existing precision gap in `_SSRF_VALIDATE_CALL`** (the shared guard-name vocabulary
+  `SRC-011` and the new `SRC-023` both rely on): its `\b` anchor never matches before a leading
+  underscore (`_validate_url(`, `_is_ssrf_safe(` — extremely common Python private-helper style), and
+  its vocabulary list didn't include several common real guard names. This caused `SRC-023` to
+  false-positive on `endpoint_scanner.py`'s own, correctly-implemented SSRF guards
+  (`_is_ssrf_safe`/`_resolves_to_unsafe_ip`) — fixed by dropping the anchor and broadening the
+  vocabulary, which also improves `SRC-011`'s real-world recall on any codebase using this common
+  naming style.
+- **`SRC-026` false-positived on `server.py`'s own scan-target host extraction**
+  (`host = parsed.hostname or "localhost"`) — that line parses a *scan target's* URL, it isn't this
+  server declaring where it binds. Added an exclusion for `host = ...` assignments whose right-hand
+  side parses an existing URL (`.hostname`, `urlparse(`), with a regression test.
+
+### Validated end-to-end against the real campaign, not just unit tests
+Beyond each rule's own validation, the finished set was swept across every locally-cloned Round 30
+target (both confirmed-vulnerable and confirmed-clean) with zero further false positives, and
+specifically re-checked against the two hardest real findings from earlier in the night:
+`SRC-025` fires correctly on `ibkr-portfolio-builder-mcp`, `SRC-027` fires correctly on
+`mcp-construction`, with **no cross-contamination** between the two repos. Coverage against the
+Round 30 benchmark (10 confirmed findings, checked earlier tonight before this release) went from
+**2 of 10 caught to 5 of 10** — real, measured, not asserted.
+
+142 rules total (up from 133), live via `security://rules`. 188 tests passing (up from 169), ruff
+clean, ships with a fully clean self-scan (all findings above were either fixed as real bugs or
+resolved as genuine false positives — none suppressed to hide them).
+
 ## [0.6.1] - 2026-09-02
 
 ### Fixed — 3 critical bugs found by a full line-by-line code audit

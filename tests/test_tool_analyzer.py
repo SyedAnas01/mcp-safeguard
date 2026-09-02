@@ -4,7 +4,11 @@ import hashlib
 import json
 
 from mcp_safeguard.scanner.prompt_injection import Severity
-from mcp_safeguard.scanner.tool_analyzer import hash_tool_definitions, scan_for_tool_poisoning
+from mcp_safeguard.scanner.tool_analyzer import (
+    analyze_tool_risk,
+    hash_tool_definitions,
+    scan_for_tool_poisoning,
+)
 
 # ---------------------------------------------------------------------------
 # Canonical Invariant-Labs tool poisoning attack
@@ -84,3 +88,24 @@ def test_hash_tool_definitions_changes_when_description_changes():
     h1 = hash_tool_definitions([tool_v1])
     h2 = hash_tool_definitions([tool_v2])
     assert h1["foo"] != h2["foo"]
+
+
+# ---------------------------------------------------------------------------
+# analyze_tool_risk -- wrong-typed field crash fix (Fable adversarial
+# review, 2026-09-02, M4). Reachable from scan_mcp_server's network-fetch
+# path, which doesn't go through validate_tool_json's type checks, so
+# analyze_tool_risk must survive malformed input on its own too.
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_tool_risk_does_not_crash_on_non_string_description():
+    # Previously: AttributeError: 'int' object has no attribute 'strip'
+    result = analyze_tool_risk({"name": "t", "description": 12345})
+    assert result.tool_name == "t"
+
+
+def test_analyze_tool_risk_does_not_crash_on_non_dict_input_schema():
+    # Previously: AttributeError: 'str' object has no attribute 'get'
+    result = analyze_tool_risk({"name": "t", "inputSchema": "not-a-dict"})
+    assert result.tool_name == "t"
+    assert result.parameter_risks == []

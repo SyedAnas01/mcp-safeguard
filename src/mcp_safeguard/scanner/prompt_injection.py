@@ -65,7 +65,16 @@ _INJECTION_PATTERNS: list[tuple[str, Severity, str, str, float]] = [
         9.1,
     ),
     (
-        r"<\s*(hidden|invisible|secret|important|system|instructions?)\s*>.*?"
+        # Gap between the tags is bounded ({0,500}) rather than an unbounded
+        # `.*?`. Combined with re.DOTALL (used at every call site below),
+        # an unbounded lazy gap here is quadratic on adversarial input: a
+        # target server can return a description containing many opening
+        # tag-like substrings with no closing tag anywhere, and re.search
+        # would retry the full remaining-text scan from each start position.
+        # A real, verified finding from this project's own adversarial
+        # self-review, not a hypothetical -- fixed alongside a size cap on
+        # fetched tool descriptions at the network boundary (server.py).
+        r"<\s*(hidden|invisible|secret|important|system|instructions?)\s*>.{0,500}?"
         r"<\s*/\s*(hidden|invisible|secret|important|system|instructions?)\s*>",
         Severity.HIGH,
         "PI-005",

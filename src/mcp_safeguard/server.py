@@ -124,6 +124,29 @@ def _client_id_from_env() -> str:
     return os.environ.get("MCP_SAFEGUARD_CLIENT_ID", "local")
 
 
+def _cap_string_fields(obj: Any, max_length: int) -> Any:
+    """
+    Recursively truncate any string value in `obj` to `max_length` characters.
+
+    Applied to tool definitions fetched over the network from a scan target.
+    Unlike the scan_tool_definitions MCP tool (which enforces
+    settings.max_tool_descriptions_length via validate_tool_json on the whole
+    pasted JSON blob), the network-fetch paths below (_fetch_tools_via_mcp and
+    the httpx /tools fallback) had no size limit at all -- a malicious or
+    compromised scan target could return an arbitrarily large tool
+    description and force every prompt-injection regex to scan it in full.
+    A real, verified finding from this project's own adversarial self-review
+    (2026-09-02), fixed alongside bounding PI-005's regex gap.
+    """
+    if isinstance(obj, str):
+        return obj[:max_length]
+    if isinstance(obj, dict):
+        return {k: _cap_string_fields(v, max_length) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_cap_string_fields(item, max_length) for item in obj]
+    return obj
+
+
 async def _fetch_tools_via_mcp(url: str, auth_token: str = "") -> list[dict[str, Any]]:
     """
     Fetch tool definitions from a target MCP server via the real MCP protocol
@@ -221,7 +244,7 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
     probing, tool poisoning analysis, and blast radius scoring.
 
     Args:
-        url: The MCP server URL to scan (e.g. http://localhost:8000).
+        url: The MCP server URL to scan (e.g. http://your-mcp-server:8000).
         auth_token: Optional Bearer token to authenticate with the server.
 
     Returns:
@@ -302,6 +325,14 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
                         )
                 except Exception:
                     pass
+
+        # Cap every string field before it reaches any scanner -- see
+        # _cap_string_fields for why this is needed on the network-fetch
+        # paths specifically.
+        tool_definitions = [
+            _cap_string_fields(t, settings.max_tool_descriptions_length)
+            for t in tool_definitions
+        ]
 
         if not tool_definitions:
             scan_warnings.append(
