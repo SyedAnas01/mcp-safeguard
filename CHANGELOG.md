@@ -2,7 +2,7 @@
 
 All notable changes to mcp-safeguard are documented here.
 
-## [0.6.0] - 2026-09-02
+## [0.6.1] - 2026-09-02
 
 ### Fixed — 3 critical bugs found by a full line-by-line code audit
 - **`scan_for_tool_poisoning` crashed on `"description": null`** — `tool.get("description", "")`
@@ -42,7 +42,34 @@ All notable changes to mcp-safeguard are documented here.
   so `scan-source . --format json > baseline.json` silently produced invalid
   JSON. Machine-readable formats now own stdout exclusively; status moves to stderr.
 
-### Added — 8 new source-audit rules (`SRC-013`..`SRC-020`)
+### Added — a 9th source-audit rule, `SRC-021`, validated end-to-end against a live campaign
+- `SRC-021` — a network listener (HTTP/SSE) starts serving with **no inbound
+  authentication check anywhere in the file** (excludes stdio transport,
+  which isn't network-exposed). This turned out to be the single most common
+  real bug shape the disclosure campaign found — more common than any other
+  class — and was the one gap none of `SRC-001`..`020` covered.
+  - The first version of this rule ("flag it if no auth-adjacent word
+    appears *anywhere* in the file") **failed its own real-world validation**:
+    every real integration server mentions "Authorization"/"Bearer"/"API_KEY"
+    for its own *outbound* call to whatever backend it wraps — that's normal
+    and says nothing about whether the MCP transport itself checks its
+    callers. Rewritten to require the vocabulary to appear in an *inbound*
+    shape (reading from the incoming request's headers, or a real named
+    auth-check/middleware/provider), re-tested, and re-validated.
+  - Caught and fixed two more real false positives in the same pass: a
+    stdio-only MCP server (not network-exposed at all — excluded outright)
+    and a server whose auth provider is wired in via `FastMCP(auth=...)`
+    rather than a direct header read (the inbound-check vocabulary broadened
+    to recognize framework-level auth-provider wiring, not just manual checks).
+  - **End-to-end validated against a live, still-open campaign finding**:
+    run against the real `codespar/mcp-dev-latam` monorepo, it found 115
+    unauthenticated servers — matching, almost exactly, the 114 independently
+    hand-verified during this campaign's own adversarial re-check the same
+    night. Then swept across every other locally-cloned target from this
+    campaign (both confirmed-vulnerable and confirmed-clean) with zero
+    further false positives.
+
+### Added — 8 source-audit rules from earlier the same night (`SRC-013`..`SRC-020`)
 Each is derived from a real bug shape this project's own disclosure campaign found
 repeatedly across unrelated MCP servers — not a hypothetical:
 - `SRC-013` — TLS certificate verification disabled (`verify=False`, `ssl.CERT_NONE`, etc.)

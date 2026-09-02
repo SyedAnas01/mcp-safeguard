@@ -310,3 +310,80 @@ def test_src020_urlencoded_query_string_is_not_flagged(tmp_path):
     assert not any(f.rule_id == "SRC-020" for f in findings), (
         f"Did not expect SRC-020 when the query string is built via urlencode, got: {findings}"
     )
+
+
+# --- SRC-021: network listener with no auth vocabulary anywhere -----------
+
+
+def test_src021_listener_with_zero_auth_vocabulary_is_flagged(tmp_path):
+    """The codespar shape: a real HTTP listener, real tool dispatch, and
+    genuinely no auth mechanism of any kind anywhere in the file."""
+    (tmp_path / "index.ts").write_text(
+        '''
+        import express from "express";
+
+        const app = express();
+        app.use(express.json());
+
+        app.post("/mcp", async (req, res) => {
+            const { name, args } = req.body;
+            if (name === "create_transfer") {
+                const result = await stpRequest("POST", "/transfers", args);
+                return res.json(result);
+            }
+        });
+
+        app.listen(8080, () => console.log("listening"));
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-021" for f in findings), f"Expected SRC-021, got: {findings}"
+
+
+def test_src021_listener_with_any_auth_mention_is_not_flagged(tmp_path):
+    (tmp_path / "index.ts").write_text(
+        '''
+        import express from "express";
+
+        const app = express();
+        app.use(express.json());
+
+        app.post("/mcp", async (req, res) => {
+            const apiKey = req.headers["x-api-key"];
+            if (apiKey !== process.env.SERVER_API_KEY) {
+                return res.status(401).json({ error: "unauthorized" });
+            }
+            const { name, args } = req.body;
+            if (name === "create_transfer") {
+                const result = await stpRequest("POST", "/transfers", args);
+                return res.json(result);
+            }
+        });
+
+        app.listen(8080, () => console.log("listening"));
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-021" for f in findings), (
+        f"Did not expect SRC-021 when the file has real auth vocabulary, got: {findings}"
+    )
+
+
+def test_src021_stdio_transport_is_not_flagged(tmp_path):
+    """stdio-served MCP servers aren't network-exposed -- only reachable by
+    whoever can spawn the local process -- so "no auth check" isn't a real
+    finding there. A real, confirmed-clean stdio-only server false-positived
+    on an earlier version of this rule that didn't exclude stdio."""
+    (tmp_path / "mcp.rs").write_text(
+        '''
+        async fn main() -> Result<()> {
+            let service = server.serve(transport::stdio()).await?;
+            service.waiting().await?;
+            Ok(())
+        }
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-021" for f in findings), (
+        f"Did not expect SRC-021 for a stdio-served MCP server, got: {findings}"
+    )

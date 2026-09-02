@@ -195,6 +195,7 @@ mcp-safeguard scan-source . --severity HIGH --fail-on HIGH
 | SRC-018 | A path is built by joining a base directory with a request/argument-derived value and used in a file operation, with no realpath+containment check in between |
 | SRC-019 | Unescaped shell interpolation, same shape as SRC-009 but without requiring repo-wide corroboration — broader recall |
 | SRC-020 | A value is interpolated into a URL query string with no proper encoder (the statically-detectable root cause behind HTTP Parameter Pollution) |
+| SRC-021 | A network listener (HTTP/SSE) starts with no inbound authentication check anywhere in the file — excludes stdio transport, which isn't network-exposed |
 
 This mode is heuristic (regex/text-proximity over source, not a type-aware or
 dataflow analysis): findings are leads to confirm by reading the cited file and
@@ -380,7 +381,7 @@ Output:
 
 ## Detection Coverage
 
-**132 detection rules** across seven categories — prompt injection (15 + 4 schema-risk) + credentials (31) + tool poisoning (11) + SSRF (3) + source-audit (20) + endpoint exposure (29 paths + 12 ports + 5 response-leak escalations) + OAuth scope risks (7). This count is generated from the code itself (the `security://rules` MCP resource sums every active pattern list at call time) rather than hand-maintained here, specifically so this table can't go stale the way earlier versions of it did — query that resource for the live, authoritative number.
+**133 detection rules** across seven categories — prompt injection (15 + 4 schema-risk) + credentials (31) + tool poisoning (11) + SSRF (3) + source-audit (21) + endpoint exposure (29 paths + 12 ports + 5 response-leak escalations) + OAuth scope risks (7). This count is generated from the code itself (the `security://rules` MCP resource sums every active pattern list at call time) rather than hand-maintained here, specifically so this table can't go stale the way earlier versions of it did — query that resource for the live, authoritative number.
 
 | Category | Rules | Patterns |
 |----------|-------|---------|
@@ -390,7 +391,7 @@ Output:
 | Tool Poisoning | 11 patterns (TP-001–011) | Side-effect exfil, external calls, safety overrides, hidden instruction tags, conceal-from-user directives, read-then-exfiltrate patterns |
 | SSRF Detection | 3 rules (SS-001–003) | URL params without allowlist/blocklist protection, blind URL fetch descriptors, redirect-following without revalidation |
 | OAuth Scope Risk | 7 rules (OAUTH-001–007) | Overly-broad/write/delete/sudo/offline_access/PII-exposing OAuth scopes |
-| Source Audit | 20 rules (SRC-001–020) | Credential re-applied across a cross-host redirect, read-only enforced by string check alone, credential attached to a caller-influenced host, unenforced auth flags, unowned resource IDs keying shared state, syntax-only destructive-query classifiers, client-trusted ownership fields, unescaped shell interpolation, unhardened credential file writes, SSRF TOCTOU, silently-dropped manifest entries, disabled TLS verification, unchecked OAuth redirect_uri before a redirect, inbound-token passthrough to an outbound request, a write-capability flag that gates tool listing but not tool execution, a header value used as an authorization identity with no authentication check, real path traversal via a joined-path containment check, broader (no-repo-signal-required) shell injection, and unencoded URL query-string building. Scans the server's source tree, not a config file — see `scan-source` above |
+| Source Audit | 21 rules (SRC-001–021) | Credential re-applied across a cross-host redirect, read-only enforced by string check alone, credential attached to a caller-influenced host, unenforced auth flags, unowned resource IDs keying shared state, syntax-only destructive-query classifiers, client-trusted ownership fields, unescaped shell interpolation, unhardened credential file writes, SSRF TOCTOU, silently-dropped manifest entries, disabled TLS verification, unchecked OAuth redirect_uri before a redirect, inbound-token passthrough to an outbound request, a write-capability flag that gates tool listing but not tool execution, a header value used as an authorization identity with no authentication check, real path traversal via a joined-path containment check, broader (no-repo-signal-required) shell injection, unencoded URL query-string building, and a network listener with no inbound authentication check anywhere in the file (verified against a real, still-live unauthenticated deployment covering 115 servers in one repo — the single most common real bug shape this campaign found). Scans the server's source tree, not a config file — see `scan-source` above |
 
 ### Benchmarked against real, confirmed vulnerabilities — not just unit tests
 

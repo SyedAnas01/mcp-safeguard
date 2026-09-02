@@ -465,7 +465,7 @@ def _print_help() -> None:
 
         `scan` reads a config/tool-definition JSON. `scan-source` walks a
         server's actual source tree for code-level footguns a config scan
-        cannot see (SRC-001..SRC-020: credential handling across redirects,
+        cannot see (SRC-001..SRC-021: credential handling across redirects,
         SQL read-only enforcement, caller-influenced credential destinations,
         unenforced auth flags, unowned resource IDs, syntax-only destructive-
         query classifiers, client-trusted ownership fields, unescaped shell
@@ -473,8 +473,9 @@ def _print_help() -> None:
         silently-dropped manifest entries, disabled TLS verification,
         unchecked OAuth redirect_uri, inbound-token passthrough, a write
         flag that gates listing but not execution, a header used as an
-        authorization identity, real path traversal, and unencoded URL
-        query-string building). Source-audit findings are heuristic leads to
+        authorization identity, real path traversal, unencoded URL
+        query-string building, and a network listener with no inbound auth
+        check at all). Source-audit findings are heuristic leads to
         confirm by reading the cited file/line, not proofs.
 
         GitHub: https://github.com/SyedAnas01/mcp-safeguard

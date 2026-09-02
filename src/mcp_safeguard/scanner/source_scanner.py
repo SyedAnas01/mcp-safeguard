@@ -65,8 +65,12 @@ Rules:
   SRC-020  A value is interpolated into a URL query string with no proper
            encoder -- the statically-detectable root cause behind HTTP
            Parameter Pollution and query-string injection.
+  SRC-021  A network listener (HTTP/SSE) starts serving with NO
+           authentication-related vocabulary anywhere in the file -- the
+           single most common real bug shape this project's disclosure
+           campaign found, and the one gap none of SRC-001..020 covered.
 
-SRC-005..SRC-020 are heuristic in the same sense as SRC-001..004: each is a
+SRC-005..SRC-021 are heuristic in the same sense as SRC-001..004: each is a
 regex/text-proximity signal over source, not a type-aware or dataflow analysis.
 They are LEADS to confirm by reading the cited file, not proofs. Several
 (SRC-009, SRC-010) intentionally fire only when the SAME repository already
@@ -80,7 +84,7 @@ hand. SRC-016 uses the same discipline in reverse: it only fires when a
 write-gating flag is found INSIDE a list-tools function and confirmed ABSENT
 everywhere else in the file, rather than merely noting the flag exists.
 
-SRC-013..SRC-020 were added after this project's own coordinated-disclosure
+SRC-013..SRC-021 were added after this project's own coordinated-disclosure
 campaign against real-world MCP servers turned up the same handful of bug
 shapes repeatedly across unrelated codebases -- each rule below cites the
 pattern it was derived from, not a hypothetical.
@@ -123,6 +127,7 @@ RULE_IDS: list[tuple[str, str]] = [
     ("SRC-018", "Path traversal: joined path used with no containment check"),
     ("SRC-019", "Unescaped interpolation into a shell command (broad check)"),
     ("SRC-020", "Unencoded value interpolated into a URL query string"),
+    ("SRC-021", "Network listener starts with no authentication mechanism anywhere in the file"),
 ]
 
 
@@ -456,6 +461,40 @@ _URL_ENCODING_CALL = re.compile(
 # exclusion (a postgres_url property, not a network request).
 _DB_CONNECTION_SCHEME = re.compile(
     r"(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|sqlite|mssql|oracle)://",
+    re.IGNORECASE,
+)
+
+# SRC-021: a network listener starts serving with no INBOUND authentication
+# check anywhere in the file -- not merely an unenforced flag (that's
+# SRC-005), but no check of the CALLER's credentials at all. This was,
+# empirically, the single most common real bug shape this project's
+# disclosure campaign found, and it was the one real gap none of SRC-001..020
+# covered.
+#
+# The naive version of this rule -- "any auth-adjacent word anywhere in the
+# file suppresses it" -- was tried first and FAILED against the actual
+# vulnerable code it was derived from (codespar/mcp-dev-latam): every real
+# integration server mentions "Authorization"/"Bearer"/"API_KEY" for its own
+# OUTBOUND call to the backend it wraps (e.g. `headers["Authorization"] =
+# \`Bearer ${API_KEY}\`` when calling STP's payment API) -- that's normal and
+# says nothing about whether the MCP transport itself checks its callers.
+# This version instead requires the vocabulary to appear in an INBOUND shape:
+# reading FROM the incoming request's headers, or a real named auth-check
+# function/decorator/middleware -- not just being mentioned anywhere.
+_INBOUND_AUTH_CHECK = re.compile(
+    r"req(?:uest)?\.headers(?:\.get)?\(?\s*\[?\s*[\"']?(?:authorization|x-api-key|api-key)|"
+    r"headers\.get\(\s*[\"'](?:authorization|x-api-key)|"
+    r"\bmiddleware\b|Depends\(\s*get_current_user|login_required|"
+    r"passport\.authenticate|verify[_-]?token\(|validate[_-]?token\(|"
+    r"check[_-]?auth\(|require[_-]?auth\(|authenticate_request\(|"
+    r"authenticate\(\s*req|jwt\.verify\(|"
+    # A real auth provider wired into the app/framework construction itself
+    # (FastMCP(auth=...), Starlette app built with an OAuthProvider, etc.) --
+    # verified against a real, confirmed-auth-present MCP server whose
+    # entrypoint file imports an OAuth provider class rather than reading a
+    # header directly; an earlier version of this rule only recognized the
+    # direct-header-read shape and missed this equally common one.
+    r"\w*(?:OAuth|Auth)Provider\b|\bauth\s*=\s*\w",
     re.IGNORECASE,
 )
 
@@ -1032,6 +1071,40 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                     "concatenation/interpolation.",
                     5.5,
                 ))
+
+        # SRC-021: network listener starts, no INBOUND auth check anywhere in
+        # file. Excludes stdio transport -- a server serving over stdio
+        # (`transport::stdio()`, `StdioServerTransport`, etc.) isn't
+        # network-exposed at all; it's only reachable by whoever can spawn
+        # the local process, so "authentication" isn't a meaningful concept
+        # there. Verified: an earlier version without this exclusion
+        # false-positived on a real, confirmed-clean stdio-only MCP server.
+        nsm = _NETWORK_SERVE_CALL.search(text)
+        nsm_context = text[max(0, nsm.start() - 60):nsm.start() + 60] if nsm else ""
+        if nsm and "stdio" not in nsm_context.lower() and not _INBOUND_AUTH_CHECK.search(text):
+            file_findings.append(SourceFinding(
+                "SRC-021", Severity.CRITICAL,
+                "Network listener starts with no authentication mechanism anywhere in the file",
+                "This file starts a network listener (HTTP/SSE server), and "
+                "no inbound authentication check (reading an Authorization/"
+                "API-key header from the incoming request, or a real auth "
+                "middleware/decorator) appears anywhere in it. Any network "
+                "caller who can reach this listener can invoke every tool "
+                "it exposes with no credential of any kind. This was the "
+                "single most common real bug shape this project's own "
+                "disclosure campaign found -- more common than any other "
+                "single class -- across government and commercial MCP "
+                "servers alike.",
+                f"{rel}:{_line_of(text, nsm.start())}",
+                text[nsm.start():nsm.start() + 90].strip(),
+                "Require a credential (API key, bearer token, OAuth) on "
+                "every request before dispatching to a tool, not just on "
+                "the listener's existence. If this is intentionally a "
+                "public, unauthenticated read-only service, say so "
+                "explicitly in the file and confirm no tool it exposes can "
+                "read/write anything sensitive.",
+                9.1,
+            ))
 
         # Apply inline suppression once per file: a finding whose flagged
         # line carries `# safeguard: ignore[RULE-ID]` (or `// ...` for
