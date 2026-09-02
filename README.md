@@ -140,8 +140,8 @@ docker run -p 8000:8000 syedanas01/mcp-safeguard:latest
 
 ```python
 import json
-from mcp_shield.scanner.prompt_injection import scan_for_prompt_injection
-from mcp_shield.scanner.credential_scanner import scan_for_credentials
+from mcp_safeguard.scanner.prompt_injection import scan_for_prompt_injection
+from mcp_safeguard.scanner.credential_scanner import scan_for_credentials
 
 tools = [
     {
@@ -212,9 +212,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "mcp-safeguard": {
       "command": "python",
-      "args": ["-m", "fastmcp", "run", "src/mcp_shield/server.py"],
+      "args": ["-m", "fastmcp", "run", "src/mcp_safeguard/server.py"],
       "env": {
-        "MCP_SHIELD_API_KEY": "your-api-key-here"
+        "MCP_SAFEGUARD_API_KEY": "your-api-key-here"
       }
     }
   }
@@ -232,7 +232,7 @@ Add to `.cursor/mcp.json`:
   "mcpServers": {
     "mcp-safeguard": {
       "command": "python",
-      "args": ["-m", "fastmcp", "run", "src/mcp_shield/server.py"]
+      "args": ["-m", "fastmcp", "run", "src/mcp_safeguard/server.py"]
     }
   }
 }
@@ -242,10 +242,10 @@ Add to `.cursor/mcp.json`:
 
 ```bash
 # stdio transport (for Claude Desktop / Cursor)
-fastmcp run src/mcp_shield/server.py
+fastmcp run src/mcp_safeguard/server.py
 
 # SSE transport (for remote clients)
-fastmcp run src/mcp_shield/server.py --transport sse --port 8000
+fastmcp run src/mcp_safeguard/server.py --transport sse --port 8000
 ```
 
 ---
@@ -381,25 +381,25 @@ Output:
 ### SSRF Protection
 Only `localhost` is scannable by default. To add hosts:
 ```bash
-MCP_SHIELD_SSRF_ALLOWLIST='["localhost","127.0.0.1","my-mcp-server.internal"]'
+MCP_SAFEGUARD_SSRF_ALLOWLIST='["localhost","127.0.0.1","my-mcp-server.internal"]'
 ```
 
 ### Authentication
 ```bash
-MCP_SHIELD_API_KEY=msh_your_secret_key_here fastmcp run src/mcp_shield/server.py
+MCP_SAFEGUARD_API_KEY=mcps_your_secret_key_here fastmcp run src/mcp_safeguard/server.py
 ```
 
 ### Rate Limiting
 Default: 100 requests / 60s per client.
 ```bash
-MCP_SHIELD_RATE_LIMIT_REQUESTS=50
-MCP_SHIELD_RATE_LIMIT_WINDOW=60
+MCP_SAFEGUARD_RATE_LIMIT_REQUESTS=50
+MCP_SAFEGUARD_RATE_LIMIT_WINDOW=60
 ```
 
 ### Observability
 ```bash
-MCP_SHIELD_PROMETHEUS_ENABLED=true   # exposes /metrics
-MCP_SHIELD_OTLP_ENDPOINT=http://jaeger:4317  # OpenTelemetry tracing
+MCP_SAFEGUARD_PROMETHEUS_ENABLED=true   # exposes /metrics
+MCP_SAFEGUARD_OTLP_ENDPOINT=http://jaeger:4317  # OpenTelemetry tracing
 ```
 
 ---

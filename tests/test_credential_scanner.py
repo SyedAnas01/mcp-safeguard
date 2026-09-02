@@ -1,10 +1,10 @@
 """Tests for the credential scanner."""
 
-from mcp_shield.scanner.credential_scanner import (
+from mcp_safeguard.scanner.credential_scanner import (
     scan_for_credentials,
     scan_oauth_scopes,
 )
-from mcp_shield.scanner.prompt_injection import Severity
+from mcp_safeguard.scanner.prompt_injection import Severity
 
 
 def test_clean_config_no_findings():

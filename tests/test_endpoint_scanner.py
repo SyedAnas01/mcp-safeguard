@@ -2,12 +2,12 @@
 
 import pytest
 
-from mcp_shield.scanner.endpoint_scanner import (
+from mcp_safeguard.scanner.endpoint_scanner import (
     _is_ssrf_safe,
     _port_open,
     _resolves_to_unsafe_ip,
 )
-from mcp_shield.scanner.prompt_injection import Severity
+from mcp_safeguard.scanner.prompt_injection import Severity
 
 
 def test_localhost_is_ssrf_safe():
@@ -62,7 +62,7 @@ def test_closed_port_returns_false():
 @pytest.mark.asyncio
 async def test_scan_endpoints_blocks_ssrf():
     """Scanning a non-allowlisted host returns a blocked finding."""
-    from mcp_shield.scanner.endpoint_scanner import scan_endpoints
+    from mcp_safeguard.scanner.endpoint_scanner import scan_endpoints
 
     findings = await scan_endpoints(
         host="8.8.8.8",
@@ -77,7 +77,7 @@ async def test_scan_endpoints_blocks_ssrf():
 @pytest.mark.asyncio
 async def test_scan_endpoints_localhost_no_ssrf_block():
     """Localhost is always allowed for scanning."""
-    from mcp_shield.scanner.endpoint_scanner import scan_endpoints
+    from mcp_safeguard.scanner.endpoint_scanner import scan_endpoints
 
     # Should not return SSRF block (server is unlikely running, so likely 0 HTTP findings)
     findings = await scan_endpoints(host="localhost", port=19998, timeout=0.3)

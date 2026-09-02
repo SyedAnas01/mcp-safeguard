@@ -12,7 +12,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
-from mcp_shield import __version__
+from mcp_safeguard import __version__
 
 _tracer: trace.Tracer | None = None
 

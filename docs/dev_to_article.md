@@ -182,7 +182,7 @@ pip install mcp-safeguard
   "mcpServers": {
     "mcp-safeguard": {
       "command": "python",
-      "args": ["-m", "fastmcp", "run", "src/mcp_shield/server.py"]
+      "args": ["-m", "fastmcp", "run", "src/mcp_safeguard/server.py"]
     }
   }
 }

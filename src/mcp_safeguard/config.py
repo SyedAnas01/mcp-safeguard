@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_file=".env",
-        env_prefix="MCP_SHIELD_",
+        env_prefix="MCP_SAFEGUARD_",
         case_sensitive=False,
     )
 
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # Storage
     scan_history_max: int = Field(default=1000, description="Max scan results to retain in memory")
     report_dir: str = Field(
-        default="/tmp/mcp-shield-reports", description="Directory for report files"
+        default="/tmp/mcp-safeguard-reports", description="Directory for report files"
     )
 
     # Observability

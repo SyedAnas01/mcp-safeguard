@@ -4,14 +4,14 @@ import json
 
 import pytest
 
-from mcp_shield.scanner.prompt_injection import Severity
-from mcp_shield.scanner.tool_analyzer import analyze_tool_risk
-from mcp_shield.security.auth_middleware import (
+from mcp_safeguard.scanner.prompt_injection import Severity
+from mcp_safeguard.scanner.tool_analyzer import analyze_tool_risk
+from mcp_safeguard.security.auth_middleware import (
     authenticate_request,
     generate_api_key,
     verify_api_key,
 )
-from mcp_shield.security.input_validator import (
+from mcp_safeguard.security.input_validator import (
     ValidationError,
     sanitize_scan_id,
     validate_config_json,
@@ -20,7 +20,7 @@ from mcp_shield.security.input_validator import (
     validate_tool_json,
     validate_url,
 )
-from mcp_shield.security.rate_limiter import RateLimiter
+from mcp_safeguard.security.rate_limiter import RateLimiter
 
 # ---------------------------------------------------------------------------
 # Input Validator
@@ -291,7 +291,7 @@ async def test_compare_scans_detects_changed_tool_hash_as_regression():
     that trips no existing regex rule must still surface as a changed_tools
     regression via the hash-based rug-pull check.
     """
-    from mcp_shield.server import _scan_history, compare_scans
+    from mcp_safeguard.server import _scan_history, compare_scans
 
     id1 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     id2 = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -305,7 +305,7 @@ async def test_compare_scans_detects_changed_tool_hash_as_regression():
 
 
 async def test_compare_scans_reports_added_and_removed_tools():
-    from mcp_shield.server import _scan_history, compare_scans
+    from mcp_safeguard.server import _scan_history, compare_scans
 
     id1 = "cccccccc-cccc-cccc-cccc-cccccccccccc"
     id2 = "dddddddd-dddd-dddd-dddd-dddddddddddd"
@@ -330,8 +330,8 @@ async def test_gated_tool_rejects_unauthenticated_request_when_api_key_configure
     present (as happens outside of a real HTTP request context) must return
     exactly the authentication-required error, not proceed with the scan.
     """
-    from mcp_shield.config import settings
-    from mcp_shield.server import get_scan_history
+    from mcp_safeguard.config import settings
+    from mcp_safeguard.server import get_scan_history
 
     monkeypatch.setattr(settings, "api_key", "configured-secret-key")
 
@@ -342,8 +342,8 @@ async def test_gated_tool_rejects_unauthenticated_request_when_api_key_configure
 
 async def test_check_auth_returns_none_when_no_api_key_configured(monkeypatch):
     """Open access must be preserved when no api_key is configured (local/stdio use)."""
-    from mcp_shield.config import settings
-    from mcp_shield.server import _check_auth
+    from mcp_safeguard.config import settings
+    from mcp_safeguard.server import _check_auth
 
     monkeypatch.setattr(settings, "api_key", None)
 

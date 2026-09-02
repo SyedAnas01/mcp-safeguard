@@ -1,6 +1,6 @@
 """Tests for the prompt injection scanner."""
 
-from mcp_shield.scanner.prompt_injection import (
+from mcp_safeguard.scanner.prompt_injection import (
     Severity,
     scan_description_text,
     scan_for_prompt_injection,

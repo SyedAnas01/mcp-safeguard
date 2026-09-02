@@ -86,7 +86,7 @@ async def live_ssrf_mcp_server() -> AsyncIterator[str]:
 
 
 async def test_fetch_tools_via_mcp_retrieves_real_tool_definitions(live_mcp_server):
-    from mcp_shield.server import _fetch_tools_via_mcp
+    from mcp_safeguard.server import _fetch_tools_via_mcp
 
     tools = await _fetch_tools_via_mcp(live_mcp_server)
 
@@ -109,7 +109,7 @@ async def test_scan_mcp_server_finds_injection_via_real_protocol(live_mcp_server
     and therefore detect the injected <IMPORTANT> tag — previously this scan
     would silently report zero tool-based findings.
     """
-    from mcp_shield.server import scan_mcp_server
+    from mcp_safeguard.server import scan_mcp_server
 
     result = await scan_mcp_server(live_mcp_server)
 
@@ -129,7 +129,7 @@ async def test_scan_mcp_server_warns_when_no_tools_retrievable():
     retrieve any tool definitions, the scan must surface a warning instead of
     silently looking identical to "scanned, found nothing".
     """
-    from mcp_shield.server import scan_mcp_server
+    from mcp_safeguard.server import scan_mcp_server
 
     # Nothing is listening on this port — both fetch paths will fail.
     port = _free_port()
@@ -147,7 +147,7 @@ async def test_scan_mcp_server_wires_in_ssrf_scanner(live_ssrf_mcp_server):
     a tool with an unconstrained url fetch parameter must produce an SSRF
     finding in the full scan result.
     """
-    from mcp_shield.server import scan_mcp_server
+    from mcp_safeguard.server import scan_mcp_server
 
     result = await scan_mcp_server(live_ssrf_mcp_server)
 

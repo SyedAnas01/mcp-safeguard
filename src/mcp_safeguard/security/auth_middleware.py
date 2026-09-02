@@ -55,7 +55,7 @@ def extract_bearer_token(authorization_header: str) -> str | None:
     return None
 
 
-def generate_api_key(prefix: str = "msh") -> str:
+def generate_api_key(prefix: str = "mcps") -> str:
     """
     Generate a cryptographically secure API key.
 

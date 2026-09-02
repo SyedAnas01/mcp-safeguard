@@ -52,7 +52,7 @@ htmlcov/
 .DS_Store
 
 # Project-specific
-/tmp/mcp-shield-reports/
+/tmp/mcp-safeguard-reports/
 *.html.report
 *.json.report
 

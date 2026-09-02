@@ -1,6 +1,6 @@
 """Tests for the source-tree scanner (SRC-001..SRC-004)."""
 
-from mcp_shield.scanner.source_scanner import scan_source_tree
+from mcp_safeguard.scanner.source_scanner import scan_source_tree
 
 
 def test_src001_go_roundtrip_without_checkredirect_is_flagged(tmp_path):

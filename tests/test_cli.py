@@ -2,7 +2,7 @@
 
 import json
 
-from mcp_shield.cli import _run_scan
+from mcp_safeguard.cli import _run_scan
 
 
 def test_realistic_mcp_servers_config_warns_tools_skipped(tmp_path, capsys):

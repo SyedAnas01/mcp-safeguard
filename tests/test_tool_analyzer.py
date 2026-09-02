@@ -3,8 +3,8 @@
 import hashlib
 import json
 
-from mcp_shield.scanner.prompt_injection import Severity
-from mcp_shield.scanner.tool_analyzer import hash_tool_definitions, scan_for_tool_poisoning
+from mcp_safeguard.scanner.prompt_injection import Severity
+from mcp_safeguard.scanner.tool_analyzer import hash_tool_definitions, scan_for_tool_poisoning
 
 # ---------------------------------------------------------------------------
 # Canonical Invariant-Labs tool poisoning attack

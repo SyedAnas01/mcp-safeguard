@@ -64,7 +64,7 @@ Before you install any MCP tool, know what it can destroy if compromised.
 
 1. Add to Claude Desktop config — scan any MCP server from chat
 2. pip install mcp-safeguard + fastmcp run
-3. Docker: docker run -p 8000:8000 mcpshield/mcp-safeguard
+3. Docker: docker run -p 8000:8000 mcpsafeguard/mcp-safeguard
 
 Then: scan_mcp_server("http://localhost:8000")
 

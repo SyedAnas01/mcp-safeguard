@@ -45,7 +45,7 @@ The CI pipeline enforces both. Fix all issues before submitting.
 
 ## Adding a New Tool
 
-1. Add the tool function to `src/mcp_shield/server.py` decorated with `@mcp.tool`
+1. Add the tool function to `src/mcp_safeguard/server.py` decorated with `@mcp.tool`
 2. Follow the existing pattern: validate inputs, rate-limit, audit-log, return structured dict
 3. Add integration tests in `tests/test_server.py`
 4. Document in README.md Tools Reference section

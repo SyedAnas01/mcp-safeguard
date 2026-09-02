@@ -5,7 +5,7 @@ non-trigger fixture (same shape, minus the bug) to guard against obvious
 false positives -- same discipline as test_source_scanner.py for SRC-001..004.
 """
 
-from mcp_shield.scanner.source_scanner import scan_source_tree
+from mcp_safeguard.scanner.source_scanner import scan_source_tree
 
 # --- SRC-005: auth flag parsed and only warned about, never gated ----------
 

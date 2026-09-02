@@ -1,7 +1,7 @@
 """
 Streamlit dashboard for mcp-safeguard real-time scan statistics.
 
-Run with: streamlit run src/mcp_shield/observability/dashboard.py
+Run with: streamlit run src/mcp_safeguard/observability/dashboard.py
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-from mcp_shield import __version__
+from mcp_safeguard import __version__
 
 
 def main() -> None:
@@ -32,7 +32,7 @@ def main() -> None:
     st.caption("Real-time MCP server security scan statistics")
 
     # Load scan history from report directory
-    report_dir = Path(os.environ.get("MCP_SHIELD_REPORT_DIR", "/tmp/mcp-shield-reports"))
+    report_dir = Path(os.environ.get("MCP_SAFEGUARD_REPORT_DIR", "/tmp/mcp-safeguard-reports"))
     scan_files = sorted(report_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
 
     scans = []

@@ -1,18 +1,18 @@
 version: "3.9"
 
 services:
-  mcp-shield:
+  mcp-safeguard:
     build: .
     ports:
       - "8000:8000"
     environment:
-      MCP_SHIELD_API_KEY: ${MCP_SHIELD_API_KEY:-}
-      MCP_SHIELD_LOG_LEVEL: INFO
-      MCP_SHIELD_PROMETHEUS_ENABLED: "true"
-      MCP_SHIELD_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
-      MCP_SHIELD_REPORT_DIR: /tmp/mcp-shield-reports
+      MCP_SAFEGUARD_API_KEY: ${MCP_SAFEGUARD_API_KEY:-}
+      MCP_SAFEGUARD_LOG_LEVEL: INFO
+      MCP_SAFEGUARD_PROMETHEUS_ENABLED: "true"
+      MCP_SAFEGUARD_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+      MCP_SAFEGUARD_REPORT_DIR: /tmp/mcp-safeguard-reports
     volumes:
-      - reports:/tmp/mcp-shield-reports
+      - reports:/tmp/mcp-safeguard-reports
     depends_on:
       - prometheus
     healthcheck:
@@ -51,15 +51,15 @@ services:
 
   dashboard:
     build: .
-    command: ["python", "-m", "streamlit", "run", "src/mcp_shield/observability/dashboard.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    command: ["python", "-m", "streamlit", "run", "src/mcp_safeguard/observability/dashboard.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
     ports:
       - "8501:8501"
     environment:
-      MCP_SHIELD_REPORT_DIR: /tmp/mcp-shield-reports
+      MCP_SAFEGUARD_REPORT_DIR: /tmp/mcp-safeguard-reports
     volumes:
-      - reports:/tmp/mcp-shield-reports
+      - reports:/tmp/mcp-safeguard-reports
     depends_on:
-      - mcp-shield
+      - mcp-safeguard
     restart: unless-stopped
 
 volumes:

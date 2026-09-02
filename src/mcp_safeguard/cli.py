@@ -109,10 +109,10 @@ def _run_scan(config_path: str, min_severity: str = "INFO",
               fail_on: str | None = None, output: str | None = None,
               fmt: str = "text") -> int:
     """Run all scanners against a config file. Returns exit code."""
-    from mcp_shield.scanner.credential_scanner import scan_for_credentials
-    from mcp_shield.scanner.prompt_injection import scan_for_prompt_injection
-    from mcp_shield.scanner.ssrf_scanner import scan_for_ssrf
-    from mcp_shield.scanner.tool_analyzer import scan_for_tool_poisoning
+    from mcp_safeguard.scanner.credential_scanner import scan_for_credentials
+    from mcp_safeguard.scanner.prompt_injection import scan_for_prompt_injection
+    from mcp_safeguard.scanner.ssrf_scanner import scan_for_ssrf
+    from mcp_safeguard.scanner.tool_analyzer import scan_for_tool_poisoning
 
     _print_banner()
     print(f"Scanning: {_color(config_path, _BOLD)}")
@@ -246,7 +246,7 @@ def _run_source_scan(root_path: str, min_severity: str = "INFO",
     """Walk a source tree and run the code-level heuristic rules. Returns exit code."""
     from pathlib import Path as _Path
 
-    from mcp_shield.scanner.source_scanner import scan_source_tree
+    from mcp_safeguard.scanner.source_scanner import scan_source_tree
 
     root = _Path(root_path)
     if not root.is_dir():

@@ -4,8 +4,8 @@ These guard against false positives introduced by overly broad regexes in
 the prompt-injection and credential scanners.
 """
 
-from mcp_shield.scanner.credential_scanner import scan_for_credentials
-from mcp_shield.scanner.prompt_injection import scan_for_prompt_injection
+from mcp_safeguard.scanner.credential_scanner import scan_for_credentials
+from mcp_safeguard.scanner.prompt_injection import scan_for_prompt_injection
 
 
 def test_filesystem_word_triggers_no_prompt_injection_findings():

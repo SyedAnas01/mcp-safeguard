@@ -1,6 +1,6 @@
 """Tests for the SSRF scanner."""
 
-from mcp_shield.scanner.ssrf_scanner import scan_for_ssrf
+from mcp_safeguard.scanner.ssrf_scanner import scan_for_ssrf
 
 
 def test_url_param_with_only_format_uri_is_still_flagged():

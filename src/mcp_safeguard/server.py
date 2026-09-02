@@ -21,32 +21,32 @@ import httpx
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 
-from mcp_shield import __version__
-from mcp_shield.config import settings
-from mcp_shield.observability.metrics import (
+from mcp_safeguard import __version__
+from mcp_safeguard.config import settings
+from mcp_safeguard.observability.metrics import (
     active_scans,
     record_scan_complete,
     scan_history_size,
 )
-from mcp_shield.observability.tracing import setup_tracing
-from mcp_shield.scanner.credential_scanner import scan_for_credentials, scan_oauth_scopes
-from mcp_shield.scanner.endpoint_scanner import scan_endpoints
-from mcp_shield.scanner.prompt_injection import scan_for_prompt_injection
-from mcp_shield.scanner.report_generator import (
+from mcp_safeguard.observability.tracing import setup_tracing
+from mcp_safeguard.scanner.credential_scanner import scan_for_credentials, scan_oauth_scopes
+from mcp_safeguard.scanner.endpoint_scanner import scan_endpoints
+from mcp_safeguard.scanner.prompt_injection import scan_for_prompt_injection
+from mcp_safeguard.scanner.report_generator import (
     SecurityReport,
     generate_html_report,
     generate_scan_summary,
     report_to_dict,
 )
-from mcp_shield.scanner.ssrf_scanner import scan_for_ssrf
-from mcp_shield.scanner.tool_analyzer import (
+from mcp_safeguard.scanner.ssrf_scanner import scan_for_ssrf
+from mcp_safeguard.scanner.tool_analyzer import (
     analyze_tool_risk,
     hash_tool_definitions,
     scan_for_tool_poisoning,
 )
-from mcp_shield.security.audit_logger import audit_logger
-from mcp_shield.security.auth_middleware import authenticate_request
-from mcp_shield.security.input_validator import (
+from mcp_safeguard.security.audit_logger import audit_logger
+from mcp_safeguard.security.auth_middleware import authenticate_request
+from mcp_safeguard.security.input_validator import (
     ValidationError,
     sanitize_scan_id,
     validate_config_json,
@@ -54,7 +54,7 @@ from mcp_shield.security.input_validator import (
     validate_port,
     validate_tool_json,
 )
-from mcp_shield.security.rate_limiter import RateLimiter
+from mcp_safeguard.security.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ def _store_report(report: SecurityReport) -> None:
 
 def _client_id_from_env() -> str:
     """Derive a stable client identifier from environment (for single-user setups)."""
-    return os.environ.get("MCP_SHIELD_CLIENT_ID", "local")
+    return os.environ.get("MCP_SAFEGUARD_CLIENT_ID", "local")
 
 
 async def _fetch_tools_via_mcp(url: str, auth_token: str = "") -> list[dict[str, Any]]:
@@ -179,7 +179,7 @@ def _check_auth() -> dict[str, str] | None:
 if not settings.api_key:
     logger.warning(
         "mcp-safeguard is running without an API key configured — all tools are "
-        "accessible without authentication. Set MCP_SHIELD_API_KEY to require auth."
+        "accessible without authentication. Set MCP_SAFEGUARD_API_KEY to require auth."
     )
 
 
@@ -214,7 +214,7 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
 
     # Validate URL
     try:
-        from mcp_shield.security.input_validator import validate_url
+        from mcp_safeguard.security.input_validator import validate_url
 
         validate_url(url)
     except ValidationError as e:
@@ -798,10 +798,10 @@ async def get_report_resource(scan_id: str) -> str:
 @mcp.resource("security://rules")
 async def get_rules_resource() -> str:
     """All active detection rules across all scanner modules."""
-    from mcp_shield.scanner.credential_scanner import _CREDENTIAL_PATTERNS, _OAUTH_SCOPE_RISKS
-    from mcp_shield.scanner.endpoint_scanner import _DANGEROUS_PORTS, _SENSITIVE_PATHS
-    from mcp_shield.scanner.prompt_injection import _INJECTION_PATTERNS, _SCHEMA_RISK_PATTERNS
-    from mcp_shield.scanner.tool_analyzer import _POISONING_PATTERNS
+    from mcp_safeguard.scanner.credential_scanner import _CREDENTIAL_PATTERNS, _OAUTH_SCOPE_RISKS
+    from mcp_safeguard.scanner.endpoint_scanner import _DANGEROUS_PORTS, _SENSITIVE_PATHS
+    from mcp_safeguard.scanner.prompt_injection import _INJECTION_PATTERNS, _SCHEMA_RISK_PATTERNS
+    from mcp_safeguard.scanner.tool_analyzer import _POISONING_PATTERNS
 
     rules = {
         "prompt_injection": [
@@ -999,7 +999,7 @@ def remediation_prompt(issue_type: str) -> str:
 3. Protect all MCP endpoints with authentication:
    ```python
    # Add API key requirement to your FastMCP server
-   MCP_SHIELD_API_KEY=your-key-here
+   MCP_SAFEGUARD_API_KEY=your-key-here
    ```
 
 4. Restrict Prometheus metrics to internal networks:

@@ -79,8 +79,8 @@ pip install mcp-safeguard
 
 ```bash
 # Test the installed package
-python -c "import mcp_shield; print(mcp_shield.__version__)"
+python -c "import mcp_safeguard; print(mcp_safeguard.__version__)"
 
 # Run the server
-fastmcp run src/mcp_shield/server.py
+fastmcp run src/mcp_safeguard/server.py
 ```

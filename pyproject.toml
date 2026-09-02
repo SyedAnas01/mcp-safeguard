@@ -68,8 +68,8 @@ Documentation = "https://github.com/SyedAnas01/mcp-safeguard#readme"
 Changelog = "https://github.com/SyedAnas01/mcp-safeguard/blob/main/CHANGELOG.md"
 
 [project.scripts]
-mcp-safeguard = "mcp_shield.cli:main"
-mcp-safeguard-server = "mcp_shield.server:mcp.run"
+mcp-safeguard = "mcp_safeguard.cli:main"
+mcp-safeguard-server = "mcp_safeguard.server:mcp.run"
 
 [tool.setuptools]
 license-files = []
@@ -90,7 +90,7 @@ select = ["E", "F", "W", "I", "UP", "B", "C4"]
 ignore = ["E501", "B008", "UP007", "UP042"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["mcp_shield"]
+known-first-party = ["mcp_safeguard"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

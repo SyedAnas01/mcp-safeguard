@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from mcp_shield import __version__
+from mcp_safeguard import __version__
 
 from .credential_scanner import CredentialFinding
 from .endpoint_scanner import EndpointFinding

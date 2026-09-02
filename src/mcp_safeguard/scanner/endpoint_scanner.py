@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from mcp_shield import __version__
+from mcp_safeguard import __version__
 
 from .prompt_injection import Severity
 
