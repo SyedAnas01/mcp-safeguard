@@ -465,17 +465,20 @@ def _print_help() -> None:
 
         `scan` reads a config/tool-definition JSON. `scan-source` walks a
         server's actual source tree for code-level footguns a config scan
-        cannot see (SRC-001..SRC-021: credential handling across redirects,
-        SQL read-only enforcement, caller-influenced credential destinations,
+        cannot see (SRC-001..SRC-030: credential handling across redirects,
+        SQL/SoQL injection, caller-influenced credential destinations,
         unenforced auth flags, unowned resource IDs, syntax-only destructive-
         query classifiers, client-trusted ownership fields, unescaped shell
-        interpolation, unhardened credential file writes, SSRF TOCTOU,
-        silently-dropped manifest entries, disabled TLS verification,
-        unchecked OAuth redirect_uri, inbound-token passthrough, a write
-        flag that gates listing but not execution, a header used as an
-        authorization identity, real path traversal, unencoded URL
-        query-string building, and a network listener with no inbound auth
-        check at all). Source-audit findings are heuristic leads to
+        interpolation, unhardened credential file writes, SSRF TOCTOU and
+        unguarded outbound fetches, silently-dropped manifest entries,
+        disabled TLS verification, unchecked OAuth redirect_uri/scope,
+        inbound-token passthrough, a write flag that gates listing but not
+        execution, a header used as an authorization identity, real path
+        traversal, unencoded URL query-string building, a network listener
+        with no inbound auth check, broken object-level authorization,
+        reflected XSS, loopback servers with no Origin check, unredacted
+        error logging, plaintext credential persistence, and CORS/dev-server
+        misconfiguration). Source-audit findings are heuristic leads to
         confirm by reading the cited file/line, not proofs.
 
         GitHub: https://github.com/SyedAnas01/mcp-safeguard

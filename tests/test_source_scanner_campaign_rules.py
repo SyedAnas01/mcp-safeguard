@@ -387,3 +387,467 @@ def test_src021_stdio_transport_is_not_flagged(tmp_path):
     assert not any(f.rule_id == "SRC-021" for f in findings), (
         f"Did not expect SRC-021 for a stdio-served MCP server, got: {findings}"
     )
+
+
+# --- SRC-023: outbound fetch of a caller-derived URL, no SSRF validation ---
+
+
+def test_src023_unvalidated_fetch_is_flagged(tmp_path):
+    """The ark-forge/mcp-eu-ai-act shape: a caller-supplied repo_url is
+    passed straight into `git clone` with only a scheme prefix check --
+    no host/IP validation of any kind."""
+    (tmp_path / "scan_repo.py").write_text(
+        '''
+        import subprocess
+
+        def scan_repo_url(repo_url: str):
+            if not repo_url.startswith("https://"):
+                raise ValueError("repo_url must be an HTTPS URL")
+            subprocess.run(
+                ["git", "clone", "--depth", "1", repo_url, clone_dir],
+                check=True, capture_output=True, text=True, timeout=60,
+            )
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-023" for f in findings), f"Expected SRC-023, got: {findings}"
+
+
+def test_src023_validated_fetch_is_not_flagged(tmp_path):
+    (tmp_path / "scan_repo.py").write_text(
+        '''
+        import subprocess
+
+        def scan_repo_url(repo_url: str):
+            if not validate_url(repo_url):
+                raise ValueError("repo_url failed SSRF validation")
+            subprocess.run(
+                ["git", "clone", "--depth", "1", repo_url, clone_dir],
+                check=True, capture_output=True, text=True, timeout=60,
+            )
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-023" for f in findings), (
+        f"Did not expect SRC-023 when repo_url is passed through validate_url(), got: {findings}"
+    )
+
+
+# --- SRC-024: resource ID used as a read/approval lookup key, no ownership check (BOLA) ---
+
+
+def test_src024_id_keyed_lookup_with_no_ownership_check_is_flagged(tmp_path):
+    """The Agorai shape: get_memory takes a project_id and hands it straight
+    to a lookup call, with no getProject() access check anywhere in the
+    file -- any caller who knows another team's project_id reads its
+    memory, including memory in projects marked hidden."""
+    (tmp_path / "server.ts").write_text(
+        '''
+        server.tool(
+          "get_memory",
+          "Get project memory entries filtered by clearance",
+          GetMemorySchema.shape,
+          async (args) => {
+            const entries = await store.getMemory(args.project_id, agentId, {
+              type: args.type,
+            });
+            return { content: [{ type: "text", text: JSON.stringify(entries) }] };
+          },
+        );
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-024" for f in findings), f"Expected SRC-024, got: {findings}"
+
+
+def test_src024_id_keyed_lookup_with_ownership_check_is_not_flagged(tmp_path):
+    (tmp_path / "server.ts").write_text(
+        '''
+        server.tool(
+          "get_memory",
+          "Get project memory entries filtered by clearance",
+          GetMemorySchema.shape,
+          async (args) => {
+            const project = await store.getProject(args.project_id, agentId);
+            if (!project) return ACCESS_DENIED;
+            const entries = await store.getMemory(args.project_id, agentId, {
+              type: args.type,
+            });
+            return { content: [{ type: "text", text: JSON.stringify(entries) }] };
+          },
+        );
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-024" for f in findings), (
+        f"Did not expect SRC-024 when getProject() checks ownership first, got: {findings}"
+    )
+
+
+# --- SRC-025: unescaped request parameter interpolated into HTML (XSS) -----
+
+
+def test_src025_unescaped_next_param_in_html_is_flagged(tmp_path):
+    """The IBKR shape: a `next` query/form parameter is read straight from
+    the request and spliced unescaped into the OAuth login page's HTML via
+    a raw f-string, landing inside a value="..." attribute."""
+    (tmp_path / "auth.py").write_text(
+        '''
+        def _login_page(next_url="/"):
+            return f"""<!doctype html>
+        <html lang="en">
+        <body>
+        <form method="post" action="/login">
+        <input type="hidden" name="next" value="{next_url}" />
+        <input id="password" name="password" type="password" />
+        </form>
+        </body>
+        </html>"""
+
+        async def _login_get(request):
+            next_url = request.query_params.get("next", "/")
+            return HTMLResponse(_login_page(next_url=next_url))
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-025" for f in findings), f"Expected SRC-025, got: {findings}"
+
+
+def test_src025_html_escaped_next_param_is_not_flagged(tmp_path):
+    (tmp_path / "auth.py").write_text(
+        '''
+        import html
+
+        def _login_page(next_url="/"):
+            return f"""<!doctype html>
+        <html lang="en">
+        <body>
+        <form method="post" action="/login">
+        <input type="hidden" name="next" value="{html.escape(next_url)}" />
+        <input id="password" name="password" type="password" />
+        </form>
+        </body>
+        </html>"""
+
+        async def _login_get(request):
+            next_url = request.query_params.get("next", "/")
+            return HTMLResponse(_login_page(next_url=next_url))
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-025" for f in findings), (
+        f"Did not expect SRC-025 when the value is html.escape()'d, got: {findings}"
+    )
+
+
+# --- SRC-027: OAuth scope from request, no role check before token issuance -
+
+
+def test_src027_scope_from_request_no_role_check_is_flagged(tmp_path):
+    """The mcp-construction shape: scope is read straight off the request
+    and handed to the authorization-code call with no role comparison
+    anywhere in the file -- a viewer can request scope=admin."""
+    (tmp_path / "routes.ts").write_text(
+        '''
+        authRoutes.post('/oauth/authorize', async (c) => {
+          const body = await c.req.parseBody();
+          const scope = body['scope'] as string;
+          const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+
+          const code = await createAuthorizationCode({
+            clientId,
+            userId: user.id,
+            scope,
+            codeChallenge,
+          });
+          return c.redirect(redirectUrl);
+        });
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-027" for f in findings), f"Expected SRC-027, got: {findings}"
+
+
+def test_src027_scope_checked_against_role_is_not_flagged(tmp_path):
+    (tmp_path / "routes.ts").write_text(
+        '''
+        authRoutes.post('/oauth/authorize', async (c) => {
+          const body = await c.req.parseBody();
+          const scope = body['scope'] as string;
+          const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+
+          if (!hasRole(user, scope)) {
+            return c.json({ error: 'insufficient_role' }, 403);
+          }
+
+          const code = await createAuthorizationCode({
+            clientId,
+            userId: user.id,
+            scope,
+            codeChallenge,
+          });
+          return c.redirect(redirectUrl);
+        });
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-027" for f in findings), (
+        f"Did not expect SRC-027 when scope is checked against the user's role, got: {findings}"
+    )
+
+
+# --- SRC-028: full exception/response body logged with no redaction -------
+
+
+def test_src028_full_response_body_logged_is_flagged(tmp_path):
+    """The VA Claims MCP server shape (GSA-TTS va-claims-mcp-server-DEMO,
+    src/va_claims/utils.py:88-97): every failed call logs the VA Benefits
+    Claims API's raw error body, which routinely echoes back the veteran
+    SSN/name/DOB/address that triggered the failure."""
+    (tmp_path / "utils.py").write_text(
+        '''
+        async def call_api(token, endpoint):
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                logger.error(f"HTTP error: {e.response.status_code}")
+                logger.error(f"Response body: {e.response.text}")
+                raise
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-028" for f in findings), f"Expected SRC-028, got: {findings}"
+
+
+def test_src028_redacted_body_is_not_flagged(tmp_path):
+    (tmp_path / "utils.py").write_text(
+        '''
+        async def call_api(token, endpoint):
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Request to upstream API failed with status {e.response.status_code}")
+                raise
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-028" for f in findings), (
+        f"Did not expect SRC-028 when only a curated status code is logged, got: {findings}"
+    )
+
+
+# --- SRC-030: CORS wildcard / disabled dev-server host check --------------
+
+
+def test_src030_cors_wildcard_and_disabled_host_check_is_flagged(tmp_path):
+    """The Alpic/Skybridge shape: `cors()` with no options object sets
+    wildcard CORS reaching /mcp, and Vite's allowedHosts: true forces off
+    its DNS-rebinding Host-header allowlist, non-overridably."""
+    (tmp_path / "viewsDevServer.ts").write_text(
+        '''
+        const vite = await createServer({
+          ...devConfig,
+          server: {
+            ...userServer,
+            allowedHosts: true,
+            middlewareMode: true,
+          },
+        });
+
+        router.use(cors());
+        router.use("/", vite.middlewares);
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-030" for f in findings), f"Expected SRC-030, got: {findings}"
+
+
+def test_src030_allowlisted_cors_and_real_host_list_is_not_flagged(tmp_path):
+    (tmp_path / "viewsDevServer.ts").write_text(
+        '''
+        const corsOptions = { origin: allowedOriginsList };
+
+        const vite = await createServer({
+          ...devConfig,
+          server: {
+            ...userServer,
+            allowedHosts: ["myhost.local", "dev.internal"],
+            middlewareMode: true,
+          },
+        });
+
+        router.use(cors(corsOptions));
+        router.use("/", vite.middlewares);
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-030" for f in findings), (
+        f"Did not expect SRC-030 with an origin allowlist and a real allowedHosts list, got: {findings}"
+    )
+
+
+# --- SRC-029: runtime-obtained token/secret written to disk in plaintext ---
+
+
+def test_src029_runtime_token_written_plaintext_is_flagged(tmp_path):
+    """The bank-mcp shape (elcukro/bank-mcp): a Plaid access_token obtained
+    from a real OAuth token-exchange response is persisted straight to disk
+    via writeFileSync with no encryption of the value -- the project's own
+    SECURITY.md presents 600 file permissions alone as the complete
+    credential-storage guarantee, which this rule flags as insufficient."""
+    (tmp_path / "config.ts").write_text(
+        '''
+        async function exchangePublicToken(publicToken) {
+            const response = await plaidClient.itemPublicTokenExchange({ public_token: publicToken });
+            const accessToken = response.data.access_token;
+            return accessToken;
+        }
+
+        export function saveConfig(config) {
+            const data = JSON.stringify(config, null, 2) + "\\n";
+            writeFileSync(CONFIG_PATH, data, { mode: 0o600 });
+        }
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-029" for f in findings), f"Expected SRC-029, got: {findings}"
+
+
+def test_src029_encrypted_token_before_write_is_not_flagged(tmp_path):
+    (tmp_path / "config.ts").write_text(
+        '''
+        async function exchangePublicToken(publicToken) {
+            const response = await plaidClient.itemPublicTokenExchange({ public_token: publicToken });
+            const accessToken = response.data.access_token;
+            return accessToken;
+        }
+
+        export function saveConfig(config) {
+            const encryptedToken = encrypt(config.accessToken, masterKey);
+            const data = JSON.stringify({ ...config, accessToken: encryptedToken });
+            writeFileSync(CONFIG_PATH, data, { mode: 0o600 });
+        }
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-029" for f in findings), (
+        f"Did not expect SRC-029 when the token is encrypted before writing, got: {findings}"
+    )
+
+
+# --- SRC-026: loopback-bound server, no Origin-header check ----------------
+
+
+def test_src026_loopback_websocket_with_no_origin_check_is_flagged(tmp_path):
+    """The mcp-unity-cg shape: a WebSocket bridge binds to localhost by
+    default and never reads the Origin header, so any same-machine browser
+    tab connects directly -- no DNS rebinding even required."""
+    (tmp_path / "server.cs").write_text(
+        '''
+        void StartServerInternal()
+        {
+            var host = AllowRemoteConnections ? "0.0.0.0" : "localhost";
+            webSocketServer = new WebSocketServer($"ws://{host}:{Port}");
+            webSocketServer.Start();
+        }
+
+        protected override void OnOpen()
+        {
+            NameValueCollection headers = Context.Headers;
+            if (headers != null && headers.Contains("X-Client-Name"))
+            {
+                clientName = headers["X-Client-Name"];
+            }
+        }
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-026" for f in findings), f"Expected SRC-026, got: {findings}"
+
+
+def test_src026_loopback_server_with_origin_check_is_not_flagged(tmp_path):
+    (tmp_path / "server.cs").write_text(
+        '''
+        void StartServerInternal()
+        {
+            var host = "localhost";
+            webSocketServer = new WebSocketServer($"ws://{host}:{Port}");
+            webSocketServer.Start();
+        }
+
+        protected override void OnOpen()
+        {
+            string origin = Context.Headers["Origin"];
+            if (string.IsNullOrEmpty(origin) || !AllowedOrigins.Contains(origin))
+            {
+                Context.WebSocket.Close();
+                return;
+            }
+        }
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-026" for f in findings), (
+        f"Did not expect SRC-026 when the file validates Origin, got: {findings}"
+    )
+
+
+def test_src026_hostname_extracted_from_scan_target_url_is_not_flagged(tmp_path):
+    """`host = parsed.hostname or "localhost"` extracts a SCAN TARGET's
+    hostname (with a localhost fallback default) -- it is not this file
+    declaring where a server of its own binds. A real false positive this
+    exact shape produced during this project's own dogfooding."""
+    (tmp_path / "prober.py").write_text(
+        '''
+        from urllib.parse import urlparse
+
+        def probe(url: str):
+            parsed = urlparse(url)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 80
+            return scan_endpoints(host=host, port=port)
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-026" for f in findings), (
+        f"Did not expect SRC-026 for a scan-target hostname extraction, got: {findings}"
+    )
+
+
+# --- SRC-022: SQL/query injection via unescaped string interpolation -------
+
+
+def test_src022_fstring_sql_interpolation_is_flagged(tmp_path):
+    """The apple-health-mcp-server / cdc-places-mcp-server shape: a query
+    fragment built by hand-quoting an f-string-interpolated value directly
+    into the query text instead of binding it as a parameter."""
+    (tmp_path / "duckdb_queries.py").write_text(
+        '''
+        def get_statistics_by_type_from_duckdb(con, record_type):
+            query = f"""
+                SELECT type, COUNT(*) FROM records
+                WHERE type = '{record_type}' GROUP BY type
+            """
+            return con.execute(query).fetchall()
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-022" for f in findings), f"Expected SRC-022, got: {findings}"
+
+
+def test_src022_parameterized_query_is_not_flagged(tmp_path):
+    (tmp_path / "duckdb_queries.py").write_text(
+        '''
+        def get_statistics_by_type_from_duckdb(con, record_type):
+            query = "SELECT type, COUNT(*) FROM records WHERE type = %s GROUP BY type"
+            return con.execute(query, (record_type,)).fetchall()
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-022" for f in findings), (
+        f"Did not expect SRC-022 when the query is parameterized, got: {findings}"
+    )
