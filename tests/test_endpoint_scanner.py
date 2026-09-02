@@ -2,6 +2,7 @@
 
 import pytest
 
+import mcp_shield.scanner.endpoint_scanner as endpoint_scanner
 from mcp_shield.scanner.endpoint_scanner import (
     _is_ssrf_safe,
     _port_open,
@@ -82,3 +83,72 @@ async def test_scan_endpoints_localhost_no_ssrf_block():
     # Should not return SSRF block (server is unlikely running, so likely 0 HTTP findings)
     findings = await scan_endpoints(host="localhost", port=19998, timeout=0.3)
     assert not any(f.rule_id == "EP-SSRF-001" for f in findings)
+
+
+class _FakeResponse:
+    def __init__(self, status_code, payload=None):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = ""
+
+    def json(self):
+        return self._payload
+
+
+class _FakeAsyncClient:
+    def __init__(self, graphql_response, **kwargs):
+        self._graphql_response = graphql_response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def get(self, url):
+        return _FakeResponse(404)
+
+    async def post(self, url, json, headers):
+        assert url.endswith("/graphql")
+        assert "__schema" in json["query"]
+        return self._graphql_response
+
+
+@pytest.mark.asyncio
+async def test_graphql_introspection_exposure_detected(monkeypatch):
+    response = _FakeResponse(
+        200,
+        {"data": {"__schema": {"queryType": {"name": "Query"}}}},
+    )
+    monkeypatch.setattr(endpoint_scanner, "_port_open", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        endpoint_scanner.httpx,
+        "AsyncClient",
+        lambda **kwargs: _FakeAsyncClient(response, **kwargs),
+    )
+
+    findings = await endpoint_scanner.scan_endpoints(host="localhost", port=8000)
+
+    graphql_findings = [f for f in findings if f.rule_id == "EP-029"]
+    assert len(graphql_findings) == 1
+    assert graphql_findings[0].severity == Severity.MEDIUM
+    assert graphql_findings[0].cvss_score == 5.3
+    assert "Query" in graphql_findings[0].evidence
+
+
+@pytest.mark.asyncio
+async def test_graphql_endpoint_without_introspection_not_reported(monkeypatch):
+    response = _FakeResponse(
+        200,
+        {"errors": [{"message": "GraphQL introspection is disabled"}]},
+    )
+    monkeypatch.setattr(endpoint_scanner, "_port_open", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        endpoint_scanner.httpx,
+        "AsyncClient",
+        lambda **kwargs: _FakeAsyncClient(response, **kwargs),
+    )
+
+    findings = await endpoint_scanner.scan_endpoints(host="localhost", port=8000)
+
+    assert not any(f.rule_id == "EP-029" for f in findings)

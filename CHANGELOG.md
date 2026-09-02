@@ -119,6 +119,7 @@ All notable changes to mcp-safeguard are documented here.
 - CLI: `mcp-safeguard scan --target <path>`
 
 ## [Unreleased] - Coming in 0.4.0
+- Add `EP-029` detection for unauthenticated GraphQL schema introspection exposure.
 - **New credential detection rules**:
   - `CRED-027`: Replicate API token detection (`r8_` prefix pattern, CVSS 8.5 HIGH)
   - `CRED-028`: Cohere API key detection (CVSS 8.0 HIGH)

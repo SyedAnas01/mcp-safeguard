@@ -117,6 +117,10 @@ _DANGEROUS_PORTS: list[tuple[int, str, Severity, str, float]] = [
     (27017, "MongoDB", Severity.HIGH, "EP-PORT-012", 8.5),
 ]
 
+_GRAPHQL_INTROSPECTION_QUERY = {
+    "query": "query MCPShieldIntrospection { __schema { queryType { name } } }"
+}
+
 
 def _is_ssrf_safe(host: str, allowlist: list[str] | None = None) -> bool:
     """
@@ -273,6 +277,51 @@ async def scan_endpoints(
             except Exception:
                 pass
 
+        # A reachable /graphql route is not inherently vulnerable. Report it
+        # only when an unauthenticated introspection query exposes the schema.
+        try:
+            response = await client.post(
+                f"{base_url}/graphql",
+                json=_GRAPHQL_INTROSPECTION_QUERY,
+                headers={"Content-Type": "application/json"},
+            )
+            if response.status_code < 400:
+                payload = response.json()
+                schema = (
+                    payload.get("data", {}).get("__schema") if isinstance(payload, dict) else None
+                )
+                if isinstance(schema, dict):
+                    query_type = schema.get("queryType")
+                    query_type_name = (
+                        query_type.get("name") if isinstance(query_type, dict) else None
+                    )
+                    findings.append(
+                        EndpointFinding(
+                            rule_id="EP-029",
+                            severity=Severity.MEDIUM,
+                            title="GraphQL Introspection Exposed",
+                            description=(
+                                "The GraphQL endpoint permits unauthenticated schema "
+                                "introspection, exposing API types and operations."
+                            ),
+                            location=f"{base_url}/graphql",
+                            evidence=(
+                                f"HTTP {response.status_code}: __schema available"
+                                + (f" (query type: {query_type_name})" if query_type_name else "")
+                            ),
+                            remediation=(
+                                "Disable GraphQL introspection in production unless required, "
+                                "or restrict it to authenticated and authorized administrative users."
+                            ),
+                            cvss_score=5.3,
+                            status_code=response.status_code,
+                        )
+                    )
+        except (httpx.ConnectError, httpx.TimeoutException):
+            pass
+        except Exception:
+            pass
+
     findings.sort(key=lambda f: f.cvss_score, reverse=True)
     return findings
 
@@ -293,5 +342,6 @@ def _get_endpoint_remediation(rule_id: str) -> str:
         "EP-011": "Disable Spring Actuator in production or restrict to localhost only.",
         "EP-012": "Avoid exposing version information publicly; aids attacker reconnaissance.",
         "EP-013": "Disable trace/profiling endpoints in production.",
+        "EP-029": "Disable GraphQL introspection in production or require administrative authentication.",
     }
     return remediations.get(rule_id, "Review this endpoint and restrict access as appropriate.")
