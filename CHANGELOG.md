@@ -2,6 +2,27 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.7.3] - 2026-09-02
+
+### Fixed — last 31 Dependabot alerts (55 → 0)
+
+All 31 remaining alerts (after 0.7.1's bump of the 7 core-dependency CVEs) traced to a single
+source: `streamlit`, pulled in only via the optional `[dashboard]` extra, not any code path the
+scanner itself uses. GitPython (18 alerts) and Pillow (13 alerts) were both transitive deps of
+`streamlit` alone — confirmed via the dependency graph, not assumed.
+
+- `uv lock --upgrade-package gitpython --upgrade-package pillow --upgrade-package streamlit`
+  resolved streamlit 1.57.0 → 1.63.0, which **dropped its GitPython dependency entirely**
+  (eliminates all 18 GitPython alerts outright — no GitPython in the tree, no GitPython CVEs) and
+  bumped Pillow 12.2.0 → 12.3.0.
+- Verified against the actual alert data, not assumed: all 13 open Pillow advisories list
+  `first_patched_version: 12.3.0` — the exact version now locked patches every one of them.
+- Re-synced the environment to the real bumped versions (not just the lock file) and confirmed:
+  `dashboard.py` and `streamlit` both still import cleanly at the new version (no breaking API
+  changes hit), full test suite (214 tests) still passes, ruff clean.
+
+Zero open Dependabot alerts as of this release.
+
 ## [0.7.2] - 2026-09-02
 
 ### Added — `SRC-031`, a credential passed as a URL query parameter on a GET request
