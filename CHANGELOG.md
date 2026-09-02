@@ -2,6 +2,48 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.7.2] - 2026-09-02
+
+### Added — `SRC-031`, a credential passed as a URL query parameter on a GET request
+
+Closes the last gap identified while measuring 0.7.0's Round 30 coverage: `trackmage-mcp-server`
+sends its OAuth `client_id`/`client_secret` as `axios.get(url, { params: {...} })` on every server
+startup and token-expiry refresh, instead of a POST body as RFC 6749 §3.2 requires — the secret
+lands in every logging/caching layer that captures request URLs but not bodies (reverse-proxy/CDN/
+WAF access logs, HTTP client debug logs, APM tools). This is a genuinely new, previously-uncovered
+rule class, not a variant of `SRC-020` (that rule is about unencoded HTTP-Parameter-Pollution risk;
+this one is about credential exposure specifically, regardless of encoding).
+
+A first version matched on "a `params:`/`query:` object literal appears somewhere in the preceding
+window" alone, which false-positived on `trackmage-mcp-server`'s own
+`this.accessToken = response.data.access_token` a few lines *after* the params object that built the
+request had already closed — reading a token back off the response, not building one. Window-based
+proximity alone can't distinguish "still inside that object" from "object closed, something
+unrelated followed a few lines later." Fixed with real brace-depth tracking from the params object's
+own opening `{` up to the candidate credential key, so a match only counts if that object is
+provably still open at that point. Re-verified against the real trackmage source: only the genuine
+finding fires now.
+
+143 rules total (up from 142). 214 tests passing (up from 211), ruff clean, clean self-scan.
+
+### Validated — an internal semantic-audit methodology (not shipped in this package)
+
+Separately from rule-mining: 6 blind adversarial code-reading passes (agent given only a target's
+source + a general "does the code enforce what its own docs claim" methodology, not the known
+answer) were run against the exact 6 Round 30 findings 0.7.0's regex rules don't catch — these are
+business-logic/intent bugs (a denylist compared in the wrong value format, a safety flag that's
+LLM-controlled with no real enforcement, a session ID never bound to its creator, credentials
+matching an upstream API's own insecure contract) that are structurally different from the syntactic
+patterns SRC-*/CRED-*/etc. can recognize. Initial blind run: 2 clean hits, 1 same-class hit, 3
+misses. Two of the three misses were the same specific, fixable methodology bug (a real finding was
+found and then self-refuted because the vulnerable behavior matched an upstream API's documented
+contract, or because maintainers disclosed it as a known workshop trade-off — neither actually
+eliminates the exposure). Fixing that calibration rule, plus adding explicit config-driven
+(not just prose) claim extraction, and re-running blind: 6 of 6 now land correctly. This
+methodology is intentionally NOT part of the published package or its "manual, not AI-powered"
+positioning — it's an internal accelerant for this project's own paid audit work, kept in the
+private o1a workspace, not this repo.
+
 ## [0.7.1] - 2026-09-02
 
 ### Fixed — adversarial self-review of mcp-safeguard's own code

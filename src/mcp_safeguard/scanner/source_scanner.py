@@ -106,8 +106,11 @@ Rules:
   SRC-030  CORS configured with no origin restriction, or a dev-server
            host-validation guard explicitly disabled (Alpic/Skybridge,
            1,990+ stars).
+  SRC-031  A credential (client secret, API key, access/refresh token,
+           password) is placed in an HTTP GET request's query parameters
+           instead of a POST body (trackmage-mcp-server).
 
-SRC-005..SRC-030 are heuristic in the same sense as SRC-001..004: each is a
+SRC-005..SRC-031 are heuristic in the same sense as SRC-001..004: each is a
 regex/text-proximity signal over source, not a type-aware or dataflow analysis.
 They are LEADS to confirm by reading the cited file, not proofs. Several
 (SRC-009, SRC-010) intentionally fire only when the SAME repository already
@@ -121,7 +124,7 @@ hand. SRC-016 uses the same discipline in reverse: it only fires when a
 write-gating flag is found INSIDE a list-tools function and confirmed ABSENT
 everywhere else in the file, rather than merely noting the flag exists.
 
-SRC-013..SRC-030 were added after this project's own coordinated-disclosure
+SRC-013..SRC-031 were added after this project's own coordinated-disclosure
 campaign against real-world MCP servers turned up the same handful of bug
 shapes repeatedly across unrelated codebases -- each rule below cites the
 pattern it was derived from, not a hypothetical.
@@ -174,6 +177,7 @@ RULE_IDS: list[tuple[str, str]] = [
     ("SRC-028", "Full upstream response/exception body logged with no redaction"),
     ("SRC-029", "Live runtime-obtained access token/secret written to disk in plaintext"),
     ("SRC-030", "CORS wildcard or disabled dev-server host check exposes sensitive endpoints"),
+    ("SRC-031", "Credential passed as a URL query parameter on a GET request"),
 ]
 
 
@@ -626,6 +630,35 @@ _CORS_WILDCARD = re.compile(
 )
 _DEV_HOST_CHECK_DISABLED = re.compile(
     r"\ballowedHosts\s*:\s*true\b|\bdisableHostCheck\s*:\s*true\b",
+)
+
+# SRC-031: a credential value (client secret, API key, access/refresh token,
+# password) is placed into an HTTP GET request's query parameters instead of
+# a POST body. Derived from trackmage-mcp-server's real refreshToken()
+# implementation, which sends client_id/client_secret as axios GET params on
+# every server startup and token-expiry refresh. A blind semantic-audit
+# pass (agent given only the code and a general methodology, not the known
+# answer) independently found this exact mechanism, then self-refuted it
+# because it matches TrackMage's own documented API contract -- which is a
+# real, separately-fixed calibration bug in that methodology, not a reason
+# this codebase's own logs are any safer. RFC 6749 SS3.2 requires POST at
+# the OAuth token endpoint specifically because a GET's query string lands
+# in logging/caching layers that only ever inspect paths and headers, not
+# bodies: reverse-proxy/CDN/WAF access logs, HTTP client debug logs, and
+# APM/observability tools that capture request URLs by default.
+_CREDENTIAL_KEY_ASSIGN = re.compile(
+    r"\b(client_secret|clientSecret|api_key|apiKey|apikey|access_token|"
+    r"accessToken|refresh_token|refreshToken|private_key|privateKey|"
+    r"secret_key|secretKey|password|passwd)\s*[:=]",
+    re.IGNORECASE,
+)
+_QUERY_PARAMS_OBJECT_OPEN = re.compile(
+    r"\b(params|query|searchParams)\s*[:=]\s*\{",
+)
+_GET_VERB_CALL = re.compile(
+    r"\.get\(|requests\.get\(|axios\.get\(|httpx\.get\(|"
+    r"method\s*[:=]\s*[\"']GET[\"']",
+    re.IGNORECASE,
 )
 
 # SRC-023: outbound network fetch (HTTP, git clone, or similar) of a
@@ -1994,6 +2027,66 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                         "passed to execute()/.query()/.sql().",
                         8.6,
                     ))
+
+        # SRC-031: credential value inside a GET request's query params
+        # (params:/query:/searchParams: object) rather than a POST body.
+        # See the pattern comment above for the trackmage-mcp-server
+        # provenance. A first version matched on "params: { ... } is
+        # somewhere in the preceding N chars" alone, which false-positived
+        # on trackmage's own `this.accessToken = response.data.access_token`
+        # a few lines after the params object had already CLOSED (reading
+        # the token back off the response, not building a request) --
+        # window-based proximity alone can't tell "still inside that
+        # object" from "object closed, something unrelated followed."
+        # Fixed with real brace-depth tracking from the params-object's own
+        # opening `{` up to the candidate key, so a match only counts if
+        # that object is still open at that point.
+        for ckm in _CREDENTIAL_KEY_ASSIGN.finditer(text):
+            window = text[max(0, ckm.start() - 400):ckm.start()]
+            qm = _QUERY_PARAMS_OBJECT_OPEN.search(window)
+            if not qm or not _GET_VERB_CALL.search(window):
+                continue
+            depth = 1  # qm's own trailing "{" already opened one level
+            still_open = True
+            for ch in window[qm.end():]:
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        still_open = False
+                        break
+            if still_open:
+                file_findings.append(SourceFinding(
+                    "SRC-031", Severity.MEDIUM,
+                    "Credential passed as a URL query parameter on a GET request",
+                    "A credential-shaped value (client secret, API key, "
+                    "access/refresh token, or password) is placed in an "
+                    "HTTP GET request's query parameters (a params/query/"
+                    "searchParams object, or URLSearchParams) rather than "
+                    "a POST request body. The secret ends up in every "
+                    "logging/caching layer that captures request URLs but "
+                    "not bodies by default -- reverse-proxy/CDN/WAF access "
+                    "logs, HTTP client debug logs, and APM/observability "
+                    "tools (Sentry, Datadog, New Relic) that capture "
+                    "request URLs. This is the exact shape found in "
+                    "trackmage-mcp-server's OAuth client-credentials "
+                    "refresh, sent on every server startup and "
+                    "token-expiry cycle -- RFC 6749 SS3.2 requires POST at "
+                    "the token endpoint specifically to avoid this "
+                    "exposure.",
+                    f"{rel}:{_line_of(text, ckm.start())}",
+                    text[max(0, ckm.start() - 20):ckm.end() + 40].strip(),
+                    "Send the credential in the POST request body "
+                    "(form-encoded or JSON) instead of the URL query "
+                    "string. If the target API only documents a "
+                    "GET-with-query-params flow, that is the target "
+                    "API's own design choice, not a reason to accept the "
+                    "exposure risk to this codebase's own logs -- prefer "
+                    "an alternative POST-based flow where the target "
+                    "offers one.",
+                    5.9,
+                ))
 
         # Apply inline suppression once per file: a finding whose flagged
         # line carries `# safeguard: ignore[RULE-ID]` (or `// ...` for

@@ -851,3 +851,64 @@ def test_src022_parameterized_query_is_not_flagged(tmp_path):
     assert not any(f.rule_id == "SRC-022" for f in findings), (
         f"Did not expect SRC-022 when the query is parameterized, got: {findings}"
     )
+
+
+def test_src031_credential_in_get_query_params_is_flagged(tmp_path):
+    """The real trackmage-mcp-server shape: client_secret sent as an axios
+    GET params object instead of a POST body (RFC 6749 SS3.2 violation)."""
+    (tmp_path / "trackmage-client.js").write_text(
+        '''
+        this.refreshPromise = axios
+          .get(`${this.apiUrl}/oauth/v2/token`, {
+            params: {
+              grant_type: 'client_credentials',
+              client_id: this.clientId,
+              client_secret: this.clientSecret,
+            },
+          })
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert any(f.rule_id == "SRC-031" for f in findings), f"Expected SRC-031, got: {findings}"
+
+
+def test_src031_token_read_from_response_after_params_object_closed_is_not_flagged(tmp_path):
+    """Regression test for a real false positive caught during validation:
+    reading a token BACK off the response, after the params object that
+    built the request has already closed, is not the same bug -- a
+    window-based-only check (no brace-depth tracking) flagged this."""
+    (tmp_path / "trackmage-client.js").write_text(
+        '''
+        this.refreshPromise = axios
+          .get(`${this.apiUrl}/oauth/v2/token`, {
+            params: {
+              grant_type: 'client_credentials',
+            },
+          })
+          .then((response) => {
+            this.accessToken = response.data.access_token;
+            this.tokenExpiresAt = Date.now() + response.data.expires_in * 1000;
+          })
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-031" for f in findings), (
+        f"Did not expect SRC-031 for a token read off the response after the "
+        f"params object closed, got: {findings}"
+    )
+
+
+def test_src031_credential_in_post_body_is_not_flagged(tmp_path):
+    (tmp_path / "client.js").write_text(
+        '''
+        axios.post(`${this.apiUrl}/oauth/v2/token`, {
+          grant_type: 'client_credentials',
+          client_id: this.clientId,
+          client_secret: this.clientSecret,
+        })
+        '''
+    )
+    findings = scan_source_tree(tmp_path)
+    assert not any(f.rule_id == "SRC-031" for f in findings), (
+        f"Did not expect SRC-031 for a credential sent in a POST body, got: {findings}"
+    )
