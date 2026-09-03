@@ -2,6 +2,95 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.8.0] - 2026-09-03
+
+### Added — a first real precision measurement, plus 3 new rules (`SRC-032`..`034`) closing 3 of the 4 remaining Round 30 misses
+
+This release does the two things flagged as open in 0.7.2's own notes: measure false-positive rate on
+independently-confirmed-clean code (never done before), and close more of the Round 30 recall gap using
+that same precision discipline in reverse — read the real missed vulnerable code, generalize the pattern,
+validate against the real source, not a synthetic fixture.
+
+**Precision, measured for the first time**: scanned 11 MCP-server repos independently verified clean during
+this project's disclosure campaign (qdrant/mcp-server-qdrant, qdrant/mcp-for-docs, DeepL/deepl-mcp-server,
+wix/wix-mcp, swiggy/swiggy-mcp-server-manifest, chargebee/agentkit, redis/mcp-redis, explorium-ai/mcp-explorium,
+DIDA-AI/Dida-Hotel-MCP-Global, oilst/kraken-mcp, awslabs/iam-policy-autopilot). Before any fix, the rule set
+(v0.7.3 plus this release's own new `SRC-021` widening) produced 12 findings; reading every one against the
+actual cited file:line found 10 were genuine false positives, fixed with 5 surgical regex changes:
+
+- `SRC-023`'s inline shape only confirmed a variable NAMED "...url..." sat near a fetch call, not that its
+  value ever came from a caller — false-positived on chargebee/agentkit's API client (`url` built from an
+  operator env var + a hardcoded per-call literal path) and oilst/kraken-mcp (`url = KRAKEN_BASE + url_path`,
+  both hardcoded). Fixed by tracing the variable's own prior assignment(s) in the file and requiring at least
+  one to show real caller-derived vocabulary before trusting the inline match; a bare function parameter with
+  no local reassignment (the real ark-forge/Bybit-kaas shape) still fires unchanged.
+- The same rule also matched inside a Rust doc comment (`/// Call browser fetch(url) and return ...`,
+  awslabs/iam-policy-autopilot's WASM shim) — not executable code at all. Fixed by skipping a candidate whose
+  own line starts with a comment marker and searching on for a real one.
+- `SRC-026`'s bare-URL-literal alternative matched inside Rust `#[tokio::test]`/`#[rstest]` test functions
+  (a client pointed at an intentionally-unreachable `http://127.0.0.1:1` to test connection-refused handling,
+  and a parameterized test fixture string containing sample input for this tool's OWN source parser) —
+  neither is this file's own server binding. Fixed by excluding a bare-URL match preceded by a
+  `#[test]`/`#[tokio::test]`/`#[cfg(test)]`/`#[rstest]` attribute within ~800 chars.
+- The same rule's host-assignment alternative stitched two unrelated things into a phantom bind statement in
+  redis/mcp-redis: a `--url` CLI option's own help text describing a URI FORMAT (`user:pass@host:port/db`)
+  contains the substring "host:", and an unrelated `--host` option's `default="127.0.0.1"` a few lines below
+  landed inside the same match's 150-char lookahead window. Fixed by requiring the match not sit inside an
+  open string literal (an odd quote count between the line start and the match).
+- Widening `SRC-021`'s serve-call vocabulary for FastMCP's `mcp.run(transport=...)` idiom (below) newly
+  matched DIDA-AI/Dida-Hotel-MCP-Global's thin entrypoint file, which delegates ALL tool registration — and,
+  with it, the file's real per-request `Authorization`/`X-Secret-Key` check — to a separate module this
+  same-file rule can't see. Fixed by requiring a file with no handler of its own (`@mcp.tool`/`@app.route`
+  decorators, or `app.get(`/`app.post(`-style calls) and a `register_tools(mcp)`-shaped delegation call to be
+  treated as inconclusive rather than a same-file absence of auth.
+
+After all 5 fixes, the same 11 repos produce exactly 2 findings, both on DIDA-AI/Dida-Hotel-MCP-Global
+(`SRC-026`: the server's `HOST` env var defaults to loopback with no Origin-header check in the same file;
+`SRC-002`: its API client sets `follow_redirects=True` alongside a bearer `Authorization` header) — read
+directly, both are genuine, if lower-severity, hardening gaps rather than false positives (the redirect
+target and bind-override are both operator-configured, not attacker-controlled, so this is real
+defense-in-depth advice, not an active exploit path).
+
+**Recall**: re-measured Round 30 (10 confirmed findings from this project's own disclosure campaign) against
+the CURRENT rule set before adding anything new — 6 of 10, not 0.7.0's "5 of 10": `SRC-031`, added in 0.7.2
+specifically to close the trackmage gap, already accounts for the 6th. Reading the actual vulnerable code
+behind the remaining 4 misses produced:
+
+- `SRC-032` — a session id read from a client header (`mcp-session-id`) is used as a bracket-index lookup
+  into an in-memory session store, with no check anywhere in the file that the session's stored owner matches
+  the currently authenticated caller (Repliers-io/mcp-server: the per-request bearer token IS verified, but
+  the looked-up session's `repliersApiKey` — captured from whoever ORIGINALLY created it — is reused for the
+  current caller regardless).
+- `SRC-033` — a caller-controlled boolean tool parameter (`simulate`/`dry_run`, defaulting to the safe
+  value) is the sole gate before a real private-key signing/broadcast call, with no independent server-side
+  confirmation anywhere in the file (nirholas/UCAI: every generated write-tool takes `simulate: bool = True`;
+  flipping it is enough to move from a harmless simulation to an irreversible on-chain transfer).
+- `SRC-034` — a FastAPI/Flask route decorator for a state-changing verb exists with no
+  authentication-dependency vocabulary anywhere in the file. Deliberately does NOT require an in-file
+  network-serve call the way `SRC-021` does: an importable ASGI `app` object commonly has no `.run()` call at
+  all, served externally via a Dockerfile CMD — exactly why `SRC-021` missed
+  microsoft/AKS-Lab-GitHubCopilot's `/invoke` endpoint (zero auth, runs an arbitrary agent goal), which this
+  rule catches.
+- `SRC-021` itself widened to recognize FastMCP's `mcp.run(transport="streamable-http"/"http"/"sse")` idiom
+  (scoped to non-stdio transports only, so a bare `mcp.run()` or explicit `transport="stdio"` — neither
+  network-exposed — is never matched) — closes the OTHER half of the same AKS-Lab repo's zero-auth MCP
+  servers (`mcp.run(transport="streamable-http")` with no auth vocabulary anywhere in the file), which the
+  original `.serve(`/`.listen(`/`uvicorn.run(`/`app.run(` vocabulary never covered for FastMCP's own idiom.
+
+Each new/widened rule was validated against the REAL vulnerable source it was mined from, not a synthetic
+fixture, and fires at the exact real file:line before any synthetic test was written. Round 30 coverage:
+**6 of 10 → 9 of 10**, real and measured. The remaining miss, pedrobraiti/agentic-trading-mcp's
+symbol-denylist bypass, is intentionally NOT covered by a new rule: the bug is a format mismatch between a
+denylist built from raw config strings in one file (`policy.py`) and a BASE/QUOTE-normalized symbol compared
+against it, built in a DIFFERENT file (`app.py`) — a genuinely cross-file dataflow fact this single-file
+regex scanner has no way to see. Recorded as an honest, open gap rather than forced into a low-precision
+same-file heuristic.
+
+Re-ran the same 11 clean repos after adding the 3 new rules: no new false positives (still exactly the same
+2 genuine Dida findings; `SRC-032`/`033`/`034` fire zero times on any of them).
+
+146 rules total (up from 143). 227 tests passing (up from 214), ruff clean, clean self-scan.
+
 ## [0.7.3] - 2026-09-02
 
 ### Fixed — last 31 Dependabot alerts (55 → 0)

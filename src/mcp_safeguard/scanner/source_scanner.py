@@ -109,8 +109,26 @@ Rules:
   SRC-031  A credential (client secret, API key, access/refresh token,
            password) is placed in an HTTP GET request's query parameters
            instead of a POST body (trackmage-mcp-server).
+  SRC-032  A client-supplied session-id header value is used to look up and
+           reuse existing server-side session state (a dict/map keyed by
+           that id), with no check anywhere in the file that the session's
+           original owner matches the currently authenticated caller --
+           session hijacking (Repliers-io/mcp-server).
+  SRC-033  A caller-controlled boolean tool parameter (simulate/dry_run/
+           confirm), defaulting to the safe value, is the ONLY gate in
+           front of a private-key transaction-signing/broadcast call, with
+           no independent server-side confirmation beyond that same
+           caller-supplied flag (nirholas/UCAI's generated write tools).
+  SRC-034  A FastAPI/Flask route decorator for a state-changing verb
+           (POST/PUT/PATCH/DELETE) exists with no authentication-dependency
+           vocabulary anywhere in the file -- distinct from SRC-021, which
+           requires an in-file network-serve call as its precondition and
+           so misses an importable ASGI/WSGI `app` object served
+           externally (uvicorn/gunicorn CLI, a Dockerfile CMD) with no
+           in-file `.run()`/`.listen()` call at all
+           (microsoft/AKS-Lab-GitHubCopilot's shared agent-server factory).
 
-SRC-005..SRC-031 are heuristic in the same sense as SRC-001..004: each is a
+SRC-005..SRC-034 are heuristic in the same sense as SRC-001..004: each is a
 regex/text-proximity signal over source, not a type-aware or dataflow analysis.
 They are LEADS to confirm by reading the cited file, not proofs. Several
 (SRC-009, SRC-010) intentionally fire only when the SAME repository already
@@ -127,7 +145,20 @@ everywhere else in the file, rather than merely noting the flag exists.
 SRC-013..SRC-031 were added after this project's own coordinated-disclosure
 campaign against real-world MCP servers turned up the same handful of bug
 shapes repeatedly across unrelated codebases -- each rule below cites the
-pattern it was derived from, not a hypothetical.
+pattern it was derived from, not a hypothetical. SRC-032..SRC-034 were mined
+the same way from a later measurement of this project's own Round 30
+disclosure batch against the rule set as it stood at v0.7.3: of the 10
+confirmed findings in that batch, only 6 were caught by any rule (SRC-017,
+SRC-021, SRC-014, SRC-025, SRC-027, SRC-031 -- one each), and reading the
+actual vulnerable code behind the other 4 misses produced these 3 new rules
+plus a widened SRC-021 (see its own comment below for what was missing and
+why). One of the 4 misses, pedrobraiti/agentic-trading-mcp's symbol-denylist
+bypass, is NOT covered by a new rule here: the bug is a format mismatch
+between a denylist built from raw config strings in one file and a
+BASE/QUOTE-normalized symbol compared against it in another, a genuinely
+cross-file dataflow fact this single-file regex scanner has no way to see --
+recorded here as an honest, still-open gap rather than forced into a
+low-precision same-file heuristic.
 """
 
 from __future__ import annotations
@@ -178,6 +209,9 @@ RULE_IDS: list[tuple[str, str]] = [
     ("SRC-029", "Live runtime-obtained access token/secret written to disk in plaintext"),
     ("SRC-030", "CORS wildcard or disabled dev-server host check exposes sensitive endpoints"),
     ("SRC-031", "Credential passed as a URL query parameter on a GET request"),
+    ("SRC-032", "Session id from a client header reused with no ownership check (session hijacking)"),
+    ("SRC-033", "Caller-controlled simulate/dry-run flag is the sole gate before a signing/broadcast call"),
+    ("SRC-034", "State-changing FastAPI/Flask route with no authentication dependency anywhere in the file"),
 ]
 
 
@@ -230,7 +264,19 @@ _AUTH_WARN_ONLY = re.compile(
     re.IGNORECASE,
 )
 _NETWORK_SERVE_CALL = re.compile(
-    r"\b(?:SseServer::serve|HttpServer::new|\.serve\(|\.listen\(|uvicorn\.run\(|app\.run\()"
+    r"\b(?:SseServer::serve|HttpServer::new|\.serve\(|\.listen\(|uvicorn\.run\(|app\.run\(|"
+    # A FastMCP-style server, conventionally `mcp = FastMCP(...)`, started
+    # with `mcp.run(transport="streamable-http"/"http"/"sse")` -- the single
+    # most common network-facing MCP server idiom this rule's own
+    # disclosure campaign found, and originally missed entirely: verified
+    # against the real microsoft/AKS-Lab-GitHubCopilot MCP servers
+    # (`mcp.run(transport="streamable-http")`, zero auth vocabulary
+    # anywhere in the file), which this rule did not fire on before this
+    # alternative was added. Scoped to an explicit non-stdio transport
+    # value so a bare `mcp.run()` or `mcp.run(transport="stdio")` --
+    # neither of which is network-exposed -- is never matched in the first
+    # place, on top of the existing stdio-context exclusion below.
+    r"""\.run\(\s*transport\s*=\s*["'](?:streamable-http|http|sse)["'])"""
 )
 # A "gate" requires an actual enforcement action (exit/return/panic) near the
 # flag check -- merely testing .is_none()/.is_some() and then only warning
@@ -557,6 +603,31 @@ _INBOUND_AUTH_CHECK = re.compile(
     r"\w*(?:OAuth|Auth)Provider\b|\bauth\s*=\s*\w",
     re.IGNORECASE,
 )
+# A thin entrypoint file (construct the server, delegate every tool/route
+# registration to another module via a single `register_tools(mcp)`-shaped
+# call, then serve) genuinely cannot be judged for auth from its own text --
+# real auth may be enforced per-tool in the delegated module, which this
+# file never mentions at all. Verified against a real, confirmed-clean
+# server (DIDA-AI/Dida-Hotel-MCP-Global): its entrypoint is exactly this
+# shape and DOES check `Authorization`/`X-Secret-Key` per request, just in
+# a separate auth.py imported only by the delegated tool module -- widening
+# SRC-021's serve-call vocabulary to recognize FastMCP's `mcp.run(transport=
+# ...)` idiom (below) made this file match for the first time and, without
+# this exclusion, falsely fire. Requiring the file to define at least one
+# handler of its OWN (a `@mcp.tool`/`@app.route`-style decorator, or an
+# Express/Flask `app.get(`/`app.post(`-style call) before trusting its
+# absence-of-auth-vocabulary as real evidence fixes this without narrowing
+# the rule's already-validated true positives, which all define their
+# handlers directly in the same file as the serve call (codespar/
+# mcp-dev-latam, microsoft/AKS-Lab-GitHubCopilot).
+_DEFINES_OWN_HANDLER = re.compile(
+    r"@(?:mcp|app|router)\.(?:tool|resource|route|get|post|put|patch|delete)\s*\(|"
+    r"\b(?:app|router|server)\.(?:get|post|put|patch|delete)\s*\(\s*[\"']"
+)
+_DELEGATES_ALL_REGISTRATION = re.compile(
+    r"\bregister_(?:all_)?tools\(|\bregister_(?:all_)?routes\(|"
+    r"\bregister_handlers\(|\bsetup_(?:tools|routes)\("
+)
 
 # SRC-027: an OAuth `scope` parameter is read straight from the request and
 # flows into an issued access token / authorization code, with no comparison
@@ -692,6 +763,14 @@ _SSRF_FETCH_WITH_URLVAR_INLINE = re.compile(
 _URL_ARG_DERIVED_ASSIGN = re.compile(
     r"\b(\w+)\s*=\s*(?:(?:request|req)\.(?:args|params|query|json|body)\s*(?:\.get\(|\[)|"
     r"\w+\.get\(\s*[\"'][\w.-]*url)",
+    re.IGNORECASE,
+)
+# Same "is this value caller-derived" vocabulary as _URL_ARG_DERIVED_ASSIGN
+# above, minus its leading variable-name capture -- reused to judge an
+# arbitrary assignment's RHS in the inline-shape check just below.
+_CALLER_DERIVED_VALUE = re.compile(
+    r"(?:request|req)\.(?:args|params|query|json|body)\s*(?:\.get\(|\[)|"
+    r"\w+\.get\(\s*[\"'][\w.-]*url",
     re.IGNORECASE,
 )
 _SSRF_OUTBOUND_CALL_BARE = re.compile(
@@ -929,6 +1008,81 @@ _SQL_FSTRING_OR_CONCAT_ARG = re.compile(
 # comment shape.
 _SQL_PARAMETERIZED = re.compile(
     r"%s|\?\s*[,)]|\$\d+\b|:[A-Za-z_]\w*\b|\bparams\s*=|\bparameters\s*="
+)
+
+# SRC-032: a client-supplied session-id header value is captured into a
+# variable, and that SAME variable is later used as a bracket-index lookup
+# into some map/dict (the realistic shape for an in-memory session store),
+# with no ownership check anywhere in the file tying the looked-up session
+# to the currently authenticated caller. Distinct from SRC-006 (a
+# client-supplied ID *constructs* a new *History/*Store/*Session/*Cache/
+# *Memory object) -- this is "route an existing, already-authenticated
+# request to someone ELSE's live session state by ID alone", the
+# Repliers-io/mcp-server shape: the per-request bearer token IS verified
+# (an `authenticate`-style middleware runs on every request), but the
+# looked-up session's stored `repliersApiKey` -- captured from whoever
+# ORIGINALLY created that session -- is reused for the current caller with
+# no comparison between the two users at all.
+_SESSION_ID_FROM_HEADER = re.compile(
+    r"""\b(\w+)\s*=\s*req(?:uest)?\.headers(?:\.get)?\(?\s*\[?\s*"""
+    r"""["'](?:mcp-session-id|x-session-id|session-id)["']""",
+    re.IGNORECASE,
+)
+_SESSION_OWNERSHIP_CHECK = re.compile(
+    r"""session\.(?:owner|user_id|userId|user)\b|\.user(?:Id)?\s*(?:===|==|!==|!=)|"""
+    r"""req\.user\.id\s*(?:===|==)|ctx\.user\.id\s*(?:===|==)""",
+    re.IGNORECASE,
+)
+
+# SRC-033: a caller-controlled boolean tool parameter (part of the exposed
+# MCP tool's own input schema -- the model/agent calling the tool sets it,
+# not the server operator) whose safe value is the DEFAULT is the only
+# thing standing between the call and a real private-key
+# signing/broadcast. Derived from nirholas/UCAI's generated write-tool
+# body: every generated tool takes `simulate: bool = True`, and when a
+# caller (an LLM agent, possibly prompt-injected) passes `simulate=False`
+# execution falls straight through to `sign_transaction`/
+# `send_raw_transaction` with no OTHER gate -- no second confirmation
+# token, no human-approval step, no allowlist of who may pass False.
+# Requires the SAME file to show no independent confirmation vocabulary at
+# all -- if a codebase pairs its own simulate/dry_run flag with a real
+# second factor (a distinct confirmation-token/human-approval check), that
+# is a different, adequately-gated design this rule should not flag.
+_CALLER_SIM_FLAG_DEFAULT_SAFE = re.compile(
+    r"""\b(?:simulate|dry_run|dryRun|is_simulation)\s*:\s*bool\s*=\s*True\b|"""
+    r"""\b(?:simulate|dryRun)\s*(?::\s*boolean)?\s*=\s*true\b""",
+)
+_SIGNING_BROADCAST_CALL = re.compile(
+    r"""\bsign_transaction\(|\bsend_raw_transaction\(|\bsendTransaction\(|"""
+    r"""\beth_sendTransaction\b|\bsignAndSendTransaction\(""",
+)
+_INDEPENDENT_CONFIRMATION = re.compile(
+    r"""confirmation_token|require_approval|human_in_the_loop|human_approval|"""
+    r"""second_factor|approval_id|CONFIRM_PHRASE""",
+    re.IGNORECASE,
+)
+
+# SRC-034: a FastAPI/Flask route decorator for a state-changing HTTP verb
+# (POST/PUT/PATCH/DELETE) exists, and no authentication-dependency
+# vocabulary (Depends(...), an auth middleware, a token/API-key check, an
+# HTTPBearer/APIKeyHeader/OAuth2 security scheme) appears anywhere in the
+# file. Deliberately does NOT require an in-file network-serve call the way
+# SRC-021 does: an importable ASGI `app` object commonly has no in-file
+# `.run()`/`uvicorn.run()` at all -- it's served externally via a Dockerfile
+# CMD or a `uvicorn module:app` invocation from a Helm chart -- which is
+# exactly why SRC-021 missed the real vulnerable file this rule is derived
+# from (microsoft/AKS-Lab-GitHubCopilot's `src/shared/server.py`: a shared
+# FastAPI-app factory whose `/invoke` POST route runs an arbitrary agent
+# goal with zero authentication of any kind, `uvicorn ...:app` started only
+# from the Dockerfile/Helm chart, never from the Python source itself).
+_STATE_CHANGING_ROUTE_DECORATOR = re.compile(
+    r"""@(?:app|router)\.(?:post|put|patch|delete)\s*\(|"""
+    r"""\b(?:app|router)\.(?:post|put|patch|delete)\s*\(\s*["']""",
+)
+_ROUTE_AUTH_DEPENDENCY = re.compile(
+    r"""Depends\(|middleware\b|require[_-]?auth\(|verify[_-]?token\(|"""
+    r"""authenticate|api[_-]?key|APIKeyHeader|HTTPBearer|OAuth2""",
+    re.IGNORECASE,
 )
 
 _SRC_EXTS = {".go", ".py", ".ts", ".js", ".cs", ".rs", ".swift"}
@@ -1514,7 +1668,16 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # false-positived on a real, confirmed-clean stdio-only MCP server.
         nsm = _NETWORK_SERVE_CALL.search(text)
         nsm_context = text[max(0, nsm.start() - 60):nsm.start() + 60] if nsm else ""
-        if nsm and "stdio" not in nsm_context.lower() and not _INBOUND_AUTH_CHECK.search(text):
+        # A file that delegates ALL its tool/route registration elsewhere and
+        # defines no handler of its own gives no real evidence either way --
+        # see _DEFINES_OWN_HANDLER's comment above.
+        file_is_judgeable = _DEFINES_OWN_HANDLER.search(text) or not _DELEGATES_ALL_REGISTRATION.search(text)
+        if (
+            nsm
+            and "stdio" not in nsm_context.lower()
+            and file_is_judgeable
+            and not _INBOUND_AUTH_CHECK.search(text)
+        ):
             file_findings.append(SourceFinding(
                 "SRC-021", Severity.CRITICAL,
                 "Network listener starts with no authentication mechanism anywhere in the file",
@@ -1637,8 +1800,61 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # comment above for why this deliberately overlaps with, but
         # never double-fires alongside, SRC-011). Try the inline shape
         # first, then the assign-then-call shape.
+        #
+        # The inline shape's own vocabulary check (_SSRF_FETCH_WITH_URLVAR_
+        # INLINE) only confirms a variable NAMED "...url..." sits near the
+        # call -- not that its value ever came from a caller. Verified
+        # false-positive against two real, independently-confirmed-clean
+        # servers: chargebee/agentkit's API client (`const url =
+        # \`${this.clientConfig.baseUrl}${options.endpoint}\`` -- baseUrl is
+        # an operator env var, endpoint is a hardcoded literal at every call
+        # site) and oilst/kraken-mcp (`url = KRAKEN_BASE + url_path` --
+        # KRAKEN_BASE is a hardcoded string constant, url_path is always one
+        # of this file's own *_PATH constants). Both are "fetch(url, ...)"
+        # where "url" is only the LOCAL VARIABLE'S name, not evidence of its
+        # origin. Fixed by looking backward for that variable's own most
+        # recent assignment in the file: if one exists and its RHS shows
+        # none of _CALLER_DERIVED_VALUE's vocabulary, the variable is
+        # provably built from something else (an env var, a module
+        # constant, a config property) and this match is suppressed. A
+        # variable with NO local assignment at all -- the real
+        # ark-forge/Bybit-kaas shape, where "url" is the enclosing
+        # function's own parameter, fed by a caller-controlled tool
+        # argument with no local reassignment to trace -- still fires,
+        # unchanged.
         if not _SSRF_VALIDATE_CALL.search(text):
-            um = _SSRF_FETCH_WITH_URLVAR_INLINE.search(text)
+            um = None
+            for cand in _SSRF_FETCH_WITH_URLVAR_INLINE.finditer(text):
+                # A doc/line comment describing a fetch call in prose (e.g.
+                # a Rust `/// Call browser fetch(url) and return ...` doc
+                # comment on an extern FFI declaration -- verified false
+                # positive in awslabs/iam-policy-autopilot's WASM fetch
+                # shim) is not executable code at all. Skip a candidate
+                # whose own line starts with a comment marker and keep
+                # looking for a real one.
+                cand_line_start = text.rfind("\n", 0, cand.start()) + 1
+                cand_line_prefix = text[cand_line_start:cand.start()].lstrip()
+                if cand_line_prefix.startswith(("//", "#", "*")):
+                    continue
+                um = cand
+                break
+            if um is not None:
+                var_m = re.search(r"(\w*url\w*)\s*$", um.group(), re.IGNORECASE)
+                if var_m:
+                    var_name = var_m.group(1)
+                    prior_assigns = list(re.finditer(
+                        rf"\b{re.escape(var_name)}\s*=\s*([^;\n]{{1,200}})", text[:um.start()]
+                    ))
+                    # Require ALL prior assignments (not just the textually
+                    # last one) to show no caller-derived vocabulary before
+                    # suppressing -- a branch (switch/if-else) can assign the
+                    # same variable multiple times, only some of which are
+                    # caller-influenced, and picking just the last one would
+                    # silently ignore an earlier caller-derived branch.
+                    if prior_assigns and not any(
+                        _CALLER_DERIVED_VALUE.search(a.group(1)) for a in prior_assigns
+                    ):
+                        um = None
             if um is None:
                 for am in _URL_ARG_DERIVED_ASSIGN.finditer(text):
                     var = am.group(1)
@@ -1883,6 +2099,44 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             statement = text[lbm.start():stmt_end if stmt_end != -1 else len(text)]
             if ".hostname" in statement or "urlparse(" in statement or "parse_url(" in statement:
                 continue
+            # The host-assignment alternative's `host[:=]` half can match
+            # inside an unrelated STRING LITERAL, not a real assignment --
+            # verified false positive against real, independently-confirmed
+            # -clean code in redis/mcp-redis: a `--url` CLI option's OWN
+            # help text, `"redis://user:pass@host:port/db or rediss://..."`,
+            # contains the literal substring "host:" as URI-format prose,
+            # and a later `default="127.0.0.1"` on a DIFFERENT (unrelated)
+            # `--host` option a few lines down landed inside this same
+            # match's 150-char lookahead window, so the two unrelated
+            # things stitched together into a phantom "assignment" that was
+            # never a bind statement anywhere. Excluded by checking for an
+            # odd quote count between the start of the match's own line and
+            # the match itself -- a genuine `host = "..."` or `host: "..."`
+            # assignment is never itself nested inside another open string
+            # literal.
+            line_start = text.rfind("\n", 0, lbm.start()) + 1
+            line_prefix = text[line_start:lbm.start()]
+            if line_prefix.count('"') % 2 == 1 or line_prefix.count("'") % 2 == 1:
+                continue
+            # The bare-URL-literal alternative (no bind/listen/host= call
+            # required around it) also matches a loopback URL used as TEST
+            # DATA -- a mock/unreachable endpoint a test points a client at,
+            # or a fixture string representing someone else's source code --
+            # not this file's own server binding at all. Verified false
+            # positive against real, independently-confirmed-clean Rust
+            # `#[tokio::test]` functions in awslabs/iam-policy-autopilot
+            # (`TelemetryClient::with_endpoint("http://127.0.0.1:1")` to
+            # test connection-refused handling, and a `#[case(...)]` test
+            # fixture string containing a LocalStack `endpoint_url` that is
+            # sample INPUT to this tool's own source parser, not a bind
+            # target). Excluded by requiring no `#[test]`/`#[tokio::test]`/
+            # `#[cfg(test)]` attribute in the preceding ~500 chars -- real
+            # production bind code has no reason to sit that close to one.
+            preceding = text[max(0, lbm.start() - 800):lbm.start()]
+            if "://" in statement and re.search(
+                r"#\[\s*(?:tokio::)?test\s*\]|#\[cfg\(test\)\]|#\[rstest\]", preceding
+            ):
+                continue
             loopback_m = lbm
             break
         if loopback_m is None:
@@ -2087,6 +2341,109 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                     "offers one.",
                     5.9,
                 ))
+
+        # SRC-032: a session id read from a client header is used as a
+        # bracket-index lookup into some store, with no ownership check
+        # anywhere in the file. See the pattern comment above for the
+        # Repliers-io provenance and why this differs from SRC-006.
+        if not _SESSION_OWNERSHIP_CHECK.search(text):
+            for shm in _SESSION_ID_FROM_HEADER.finditer(text):
+                var_name = shm.group(1)
+                lookup_re = re.compile(r"\b\w+\s*\[\s*" + re.escape(var_name) + r"\s*\]")
+                if lookup_re.search(text, shm.end()):
+                    file_findings.append(SourceFinding(
+                        "SRC-032", Severity.HIGH,
+                        "Session id from a client header reused with no ownership check",
+                        "A session id is read directly from a client-controlled "
+                        "request header and used to look up existing "
+                        "server-side session state (a dict/map keyed by that "
+                        "id). Nowhere in this file is the session's stored "
+                        "owner compared against the caller currently making "
+                        "the request. If per-request authentication is "
+                        "checked at all, it authenticates the CALLER, not "
+                        "that the caller is the session's original owner -- "
+                        "any authenticated caller who supplies (or guesses) "
+                        "another user's session id is routed straight into "
+                        "that user's live session, inheriting whatever "
+                        "server-held credentials or state it carries "
+                        "(session hijacking, CWE-384).",
+                        f"{rel}:{_line_of(text, shm.start())}",
+                        text[max(0, shm.start() - 10):shm.start() + 100].strip(),
+                        "Before reusing a looked-up session, compare its "
+                        "stored owner/user id against the currently "
+                        "authenticated caller (from the verified bearer "
+                        "token/OAuth claims) and reject the request if they "
+                        "don't match.",
+                        8.1,
+                    ))
+
+        # SRC-033: a caller-controlled simulate/dry_run boolean, defaulting
+        # to the safe value, is the only thing gating a private-key
+        # signing/broadcast call in the same file, with no independent
+        # confirmation mechanism anywhere in it. See the pattern comment
+        # above for the nirholas/UCAI provenance.
+        if (
+            _CALLER_SIM_FLAG_DEFAULT_SAFE.search(text)
+            and _SIGNING_BROADCAST_CALL.search(text)
+            and not _INDEPENDENT_CONFIRMATION.search(text)
+        ):
+            fm = _CALLER_SIM_FLAG_DEFAULT_SAFE.search(text)
+            file_findings.append(SourceFinding(
+                "SRC-033", Severity.CRITICAL,
+                "Caller-controlled simulate/dry-run flag is the sole gate before a signing/broadcast call",
+                "A boolean parameter of the tool's own input schema "
+                "(simulate/dry_run, defaulting to the safe value) is the "
+                "ONLY thing standing between this call and a real "
+                "private-key transaction-signing/broadcast call in the "
+                "same file. The flag is set by whoever calls the tool -- "
+                "an LLM agent, possibly steered by prompt injection in "
+                "tool output it read earlier -- not by the server "
+                "operator, and no independent server-side confirmation "
+                "(a separate approval token, a human-in-the-loop step, a "
+                "gas cap, a chain-id pin) appears anywhere in the file. "
+                "Flipping the one flag it controls is enough for a caller "
+                "to move from a harmless simulation to an irreversible "
+                "on-chain transfer.",
+                f"{rel}:{_line_of(text, fm.start())}",
+                text[max(0, fm.start() - 10):fm.start() + 80].strip(),
+                "Require a SEPARATE, server-controlled confirmation before "
+                "executing for real -- an explicit approval step a human "
+                "reviews, a signed confirmation token issued only after "
+                "the simulation is shown to the user, and/or a hard "
+                "gas-cap and chain-id allowlist enforced independently of "
+                "the caller-supplied flag.",
+                9.1,
+            ))
+
+        # SRC-034: a state-changing FastAPI/Flask route decorator, no
+        # authentication-dependency vocabulary anywhere in the file. Does
+        # NOT require an in-file serve call (see the pattern comment above
+        # for why, and the microsoft/AKS-Lab-GitHubCopilot provenance).
+        rdm = _STATE_CHANGING_ROUTE_DECORATOR.search(text)
+        if rdm and not _ROUTE_AUTH_DEPENDENCY.search(text):
+            file_findings.append(SourceFinding(
+                "SRC-034", Severity.CRITICAL,
+                "State-changing FastAPI/Flask route with no authentication dependency anywhere in the file",
+                "This file defines a route for a state-changing HTTP verb "
+                "(POST/PUT/PATCH/DELETE) and no authentication-dependency "
+                "vocabulary (Depends(...), an auth middleware, a token/"
+                "API-key check, an HTTPBearer/APIKeyHeader/OAuth2 security "
+                "scheme) appears anywhere in it. Unlike SRC-021, this "
+                "doesn't require an in-file network-serve call -- an "
+                "importable ASGI/WSGI `app` object is very commonly served "
+                "externally (a Dockerfile CMD, `uvicorn module:app` from a "
+                "Helm chart) with no `.run()`/`.listen()` call in the "
+                "Python source at all, which is exactly the shape SRC-021 "
+                "cannot see. Any caller who can reach this route can "
+                "invoke it with no credential of any kind.",
+                f"{rel}:{_line_of(text, rdm.start())}",
+                text[rdm.start():rdm.start() + 90].strip(),
+                "Add an authentication dependency (FastAPI Depends(...) "
+                "wired to a real token/API-key check, or Flask "
+                "before_request middleware) to this route, or to the app "
+                "globally, before it accepts state-changing requests.",
+                9.1,
+            ))
 
         # Apply inline suppression once per file: a finding whose flagged
         # line carries `# safeguard: ignore[RULE-ID]` (or `// ...` for
