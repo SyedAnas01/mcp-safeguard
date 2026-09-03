@@ -2,6 +2,19 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [Unreleased]
+
+### Documentation — benchmarking discipline
+
+Added `BENCHMARKING.md`: every detection rule here is mined from a real confirmed finding in this
+project's own disclosure campaign, which means a target used to mine a rule can never also be used
+to measure that rule's recall without the number being circular. Documents the discipline going
+forward (a target is either holdout or training data, never both; every published recall number
+must name its holdout set and rule-set version) and flags that recall figures computed against this
+project's own "Round 30" disclosure batch (e.g. any past "9 of 10" claim) are not a valid general
+recall estimate — several of the rules that catch those findings were mined directly from them. No
+code changes; rule count and test count unchanged from v0.8.0 (146 rules, 227 tests).
+
 ## [0.8.0] - 2026-09-03
 
 ### Added — a first real precision measurement, plus 3 new rules (`SRC-032`..`034`) closing 3 of the 4 remaining Round 30 misses
