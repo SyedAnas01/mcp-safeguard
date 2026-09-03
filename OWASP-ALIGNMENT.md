@@ -2,7 +2,7 @@
 
 This document maps mcp-safeguard's detection rules to OWASP's 2026 MCP security guidance.
 
-OWASP classified **MCP Tool Poisoning** as an official 2026 attack category. This table shows how mcp-safeguard's 146 detection rules — prompt injection (15), credentials (31), tool poisoning (11), SSRF (3), OAuth scope risk (7), and source-audit (34) — plus 29 endpoint path probes and 12 dangerous-port checks cover OWASP's identified threat categories. This count is generated from the code itself (the `security://rules` MCP resource) rather than hand-maintained here.
+OWASP classified **MCP Tool Poisoning** as an official 2026 attack category. This table shows how mcp-safeguard's 148 detection rules — prompt injection (15), credentials (31), tool poisoning (11), SSRF (3), OAuth scope risk (7), and source-audit (36) — plus 29 endpoint path probes and 12 dangerous-port checks cover OWASP's identified threat categories. This count is generated from the code itself (the `security://rules` MCP resource) rather than hand-maintained here.
 
 ---
 
@@ -124,7 +124,7 @@ credential even when its value doesn't match the expected format.
 | SS-002 | Redirect-following URL fetch with no revalidation |
 | SS-003 | Missing scheme restriction on a URL-fetching tool |
 
-### Category VI — Source-Level Audit (SRC-001 to SRC-034)
+### Category VI — Source-Level Audit (SRC-001 to SRC-036)
 *Covers: multiple categories above, at the source-code level rather than the
 config/tool-definition level — see `scan-source` in README.md for the full
 per-rule table. Includes SRC-021 (missing authentication on the MCP

@@ -2,7 +2,7 @@
 
 All notable changes to mcp-safeguard are documented here.
 
-## [Unreleased]
+## [0.9.0] - 2026-09-03
 
 ### Documentation — benchmarking discipline
 
@@ -12,8 +12,76 @@ to measure that rule's recall without the number being circular. Documents the d
 forward (a target is either holdout or training data, never both; every published recall number
 must name its holdout set and rule-set version) and flags that recall figures computed against this
 project's own "Round 30" disclosure batch (e.g. any past "9 of 10" claim) are not a valid general
-recall estimate — several of the rules that catch those findings were mined directly from them. No
-code changes; rule count and test count unchanged from v0.8.0 (146 rules, 227 tests).
+recall estimate — several of the rules that catch those findings were mined directly from them.
+
+### Fixed — a real holdout-recall measurement, an extension-allowlist blind spot, and 2 existing-rule pattern gaps
+
+`BENCHMARKING.md`'s discipline was put into practice for the first time: Round 31 (an 8-target,
+10-finding batch from this project's own disclosure campaign, confirmed via exhaustive grep to have
+never informed any rule shipped through v0.8.0) was scanned as a genuine holdout. Honest result before
+any change: **0 of 10** caught at the exact reported vulnerable file:line.
+
+**`_SRC_EXTS` was missing `.mjs` entirely** — gomission/mcp's whole source tree is `.mjs`; the scanner
+read zero bytes of that repo. Added `.mjs`, and while auditing the rest of the allowlist for the same
+blind spot, `.cjs`/`.mts`/`.cts` (the other real Node/TypeScript module-extension variants). Measured in
+isolation before any other change: the extension fix alone caught 0 of the 10 findings at their exact
+line (both of gomission/mcp's specific bugs still needed a rule-pattern fix, confirmed below) — but it
+did restore real coverage of a previously entirely-unscanned repo.
+
+Reading the actual vulnerable code behind the remaining misses produced 2 new rules and 3 fixes to
+existing rules, rather than new rules everywhere a miss existed:
+
+- **`SRC-021` widened** for `mcp.run(transport=<variable>)`, not just a literal `"sse"`/`"http"`/
+  `"streamable-http"` string — the real aliyun/alibaba-cloud-ops-mcp-server RCE uses a
+  `click.Choice`-parsed CLI argument, arguably the more common real-world shape for a server exposing a
+  `--transport` flag at all. Excludes the literal `None` sentinel to avoid over-firing on FastMCP's own
+  "use the constructor default" idiom.
+- **`SRC-018` fixed twice**: its file-operation vocabulary was missing `readFileSync`/`writeFileSync`
+  (only the bare, non-Sync forms were recognized), and its inline join-then-arg-name gap used a
+  character class that excludes `)`, so it couldn't see past a NESTED function call's own closing paren
+  before reaching the argument name — both real gomission/mcp misses (`path.join(receiptsDir(this.
+  workspace), \`${args.receipt_id}.json\`)` then `fs.readFileSync(file, "utf8")`), now caught at the
+  exact reported line in both of its duplicate locations (`src/proxy.mjs:325`, `src/serve.mjs:340`).
+- **`SRC-035` (new)**: a secret-shaped constant (secret/token/password/credential/api_key/auth_key in
+  its own name) falls back to a hardcoded, non-empty string literal when its env var is unset
+  (`X = process.env.Y || 'literal'` / Python's `os.environ.get('Y', 'literal')`) — OjasKord/bizfile-mcp's
+  real `STATS_KEY = process.env.STATS_KEY || 'ojas2026'`, gating 4 admin/stats endpoints. An
+  empty-string fallback is excluded on purpose: the adjacent, non-vulnerable `OWNER_KEY = process.env.
+  OWNER_KEY || ''` line in the same real file is the validating true negative.
+- **`SRC-036` (new)**: the MCP SDK's own DNS-rebinding-protection flag explicitly turned off
+  (`enable_dns_rebinding_protection` set to `False`, verified against the `mcp` SDK's own source) —
+  eren-solutions/mcp-security-audit, notable because that project is itself a security-audit tool.
+
+**Result after mining: 4 of 10** on Round 31 — no longer a valid holdout number for these specific
+findings (expected and disclosed, same as the Round 30 precedent). Several misses are logged as open
+gaps rather than forced into a low-precision rule, on the same discipline as the pre-existing
+agentic-trading-mcp gap: Concord-mcp's identity-spoofing bug (a structurally different call shape than
+SRC-024's BOLA vocabulary), CryptoAPIs-io's dead-but-present auth branch (a live-but-logically-dead
+comparison a presence/absence heuristic can't see), doitintl's destructiveHint-only gating (a cross-file
+"an approval mechanism exists elsewhere but wasn't wired here" fact), and gomission/mcp's own
+trust-classifier bypass (specific to that file's own ordered pattern-list data structure, not a
+cross-repo bug class).
+
+**Real second-order check**: re-ran the updated rule set against Round 32 (a different, still-clean
+holdout — Canada/Australia/LatAm/SEA geography sweep, 3 confirmed findings, none of which were mined
+from this session) with zero rule changes made in response. Honest result: **0 of 3** at the exact
+reported file:line (bcgov/raven's PII-scrubber regex bypass, oraichain/ragflow-mcp's fake-JWT
+auth-bypass, and agoda-com/api-agent's SSRF — none matches any rule mined this session or before it;
+`SRC-023` did fire on a third, genuinely-real sink further down the same unguarded SSRF call chain the
+agoda-com finding describes, `api_agent/rest/schema_loader.py:250`, but not at either of the write-up's
+two explicitly cited locations, so it's counted as a miss under this benchmark's own strict criterion).
+Round 32 was left clean — no rules were mined from it — and remains usable as a future holdout.
+
+**Precision re-confirmed**: re-scanned the same 11 independently-verified-clean repos from v0.8.0's
+precision measurement. Same result as before this session's changes: exactly 2 findings, both the
+same pre-existing genuine (non-false-positive) hardening gaps on Dida-Hotel-MCP-Global. Zero new false
+positives from the extension fix, the 3 existing-rule fixes, or the 2 new rules.
+
+148 rules total (up from 146; source-audit 34 → 36). 240 tests passing (up from 227, 13 new), ruff
+clean, clean self-scan (one of the 2 new rules' own doc comments and finding-description string
+originally self-matched its own trigger pattern when the scanner ran against its own source — reworded
+both, the same "don't literally reproduce the trigger substring" discipline SRC-013's comment already
+documents).
 
 ## [0.8.0] - 2026-09-03
 

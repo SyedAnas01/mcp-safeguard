@@ -127,8 +127,18 @@ Rules:
            externally (uvicorn/gunicorn CLI, a Dockerfile CMD) with no
            in-file `.run()`/`.listen()` call at all
            (microsoft/AKS-Lab-GitHubCopilot's shared agent-server factory).
+  SRC-035  A secret-shaped constant (secret/token/password/credential/
+           api_key/auth_key in its own name) falls back to a hardcoded,
+           non-empty string literal when its backing env var is unset
+           (`X = process.env.Y || 'literal'` / `os.environ.get('Y',
+           'literal')`) -- the process boots with a real, guessable default
+           credential instead of failing closed (OjasKord/bizfile-mcp).
+  SRC-036  The MCP SDK's own DNS-rebinding-protection setting
+           (`enable_dns_rebinding_protection`) is explicitly set to False,
+           either as an attribute assignment or a constructor keyword
+           argument (eren-solutions/mcp-security-audit).
 
-SRC-005..SRC-034 are heuristic in the same sense as SRC-001..004: each is a
+SRC-005..SRC-036 are heuristic in the same sense as SRC-001..004: each is a
 regex/text-proximity signal over source, not a type-aware or dataflow analysis.
 They are LEADS to confirm by reading the cited file, not proofs. Several
 (SRC-009, SRC-010) intentionally fire only when the SAME repository already
@@ -159,6 +169,40 @@ BASE/QUOTE-normalized symbol compared against it in another, a genuinely
 cross-file dataflow fact this single-file regex scanner has no way to see --
 recorded here as an honest, still-open gap rather than forced into a
 low-precision same-file heuristic.
+
+SRC-035 and SRC-036 were mined the same way from a real, honest holdout-
+recall measurement against Round 31 (an 8-target, 10-finding batch from
+this project's own disclosure campaign, confirmed via exhaustive grep to
+have never informed any rule shipped before it): as measured, v0.8.0 caught
+0 of 10. Reading the actual vulnerable code behind each miss produced
+SRC-035, SRC-036, and three targeted fixes to EXISTING rules rather than
+new ones, where the miss was a pattern gap in a rule whose underlying bug
+class already existed: SRC-021's `.run(transport=...)` alternative was
+literal-string-only and missed the argparse/click-driven `transport=
+<variable>` shape (the real aliyun/alibaba-cloud-ops-mcp-server RCE);
+SRC-018's file-operation vocabulary was missing the `readFileSync`/
+`writeFileSync` Sync-suffixed forms, and its inline join-then-arg gap
+couldn't see past a nested function call's own closing paren (both real
+gomission/mcp misses); and `_SRC_EXTS` was missing `.mjs`/`.cjs`/`.mts`/
+`.cts` entirely (gomission/mcp's whole tree is `.mjs`; the scanner read
+zero bytes of it before this fix). Several Round 31 misses are logged as
+open gaps rather than forced into a rule here, on the same "don't force a
+low-precision heuristic" discipline as the agentic-trading-mcp gap above:
+Get-Concord-AI/concord-mcp's identity-spoofing bug (a caller-supplied
+`agent_id` trusted by a `resolveActorId()`-style resolver with no
+signature/session verification -- conceptually close to SRC-024's BOLA
+vocabulary but a structurally different call shape that a same-vocabulary
+widening would either miss entirely or over-match); CryptoAPIs-io's dead
+auth branch (auth vocabulary is present in the file but the comparison
+that would make it real never happens -- presence/absence-of-vocabulary
+heuristics cannot see a live-but-logically-dead branch); doitintl's
+destructiveHint-only gating (detecting "a real approval mechanism exists
+elsewhere in this codebase but wasn't wired to this tool" is a cross-file
+fact, not a same-file pattern); and gomission/mcp's own trust-classifier
+bypass (the bug is specific to that file's own ordered any/not/
+requiresAlso pattern-list design -- a regex general enough to catch it
+would be specific to this one codebase's internal data structure, not a
+cross-repo bug class).
 """
 
 from __future__ import annotations
@@ -212,6 +256,8 @@ RULE_IDS: list[tuple[str, str]] = [
     ("SRC-032", "Session id from a client header reused with no ownership check (session hijacking)"),
     ("SRC-033", "Caller-controlled simulate/dry-run flag is the sole gate before a signing/broadcast call"),
     ("SRC-034", "State-changing FastAPI/Flask route with no authentication dependency anywhere in the file"),
+    ("SRC-035", "Secret-shaped constant falls back to a hardcoded non-empty string when its env var is unset"),
+    ("SRC-036", "MCP SDK's DNS-rebinding protection explicitly disabled"),
 ]
 
 
@@ -276,7 +322,24 @@ _NETWORK_SERVE_CALL = re.compile(
     # value so a bare `mcp.run()` or `mcp.run(transport="stdio")` --
     # neither of which is network-exposed -- is never matched in the first
     # place, on top of the existing stdio-context exclusion below.
-    r"""\.run\(\s*transport\s*=\s*["'](?:streamable-http|http|sse)["'])"""
+    #
+    # Round 31 (Holdout Set A) miss: the literal-string-only version above
+    # never matches `mcp.run(transport=transport)`, where `transport` is a
+    # plain CLI-parsed variable -- the real shape of the aliyun/alibaba-
+    # cloud-ops-mcp-server RCE (`@click.option("--transport",
+    # type=click.Choice(["stdio", "sse", "streamable-http"]), default=
+    # "stdio")` feeding a `def main(transport: str, ...)` that calls
+    # `mcp.run(transport=transport)`). This is arguably the MORE common
+    # real-world shape (argparse/click-driven servers), since the whole
+    # point of exposing a --transport flag is to let the operator choose a
+    # network transport at runtime. Widened to also accept a bare
+    # identifier as the value -- still scoped to the exact `.run(transport=
+    # ...)` call shape (not "any variable passed to any function"), so it
+    # stays anchored to something that is plausibly a serve/run invocation.
+    # `None` is excluded: `transport=None` is FastMCP's own "use the
+    # constructor-configured default" sentinel, not evidence of a runtime-
+    # selectable network transport.
+    r"""\.run\(\s*transport\s*=\s*(?:["'](?:streamable-http|http|sse)["']|(?!None\b)[A-Za-z_]\w*)\))"""
 )
 # A "gate" requires an actual enforcement action (exit/return/panic) near the
 # flag check -- merely testing .is_none()/.is_some() and then only warning
@@ -516,9 +579,20 @@ _AUTH_CHECK_PRESENT = re.compile(
 # (os.path.join(base, request.args.get("f"))), and the far more common
 # "extract to a variable first, then join" shape (f = request.args.get("f");
 # os.path.join(base, f)) -- tracked the same two-pass way as SRC-015/019.
+#
+# The gap between the join call and the arg-name token was originally a
+# plain "no closing paren" character class ([^)\n]{0,80}), which cannot see
+# past a NESTED call with its own closing paren -- a real Round 31 (Holdout
+# Set A) miss: gomission/mcp's actual vulnerable line is
+# `path.join(receiptsDir(this.workspace), \`${args.receipt_id}.json\`)`,
+# where receiptsDir(this.workspace)'s own ")" terminated the old character
+# class before it ever reached "args". Widened to tolerate one level of
+# balanced nested parens in that gap (still bounded, still anchored to the
+# same join-call-then-arg-token shape -- not a general "match anything"
+# loosening).
 _PATH_JOIN_WITH_ARG_INLINE = re.compile(
     r"(?:os\.path\.join\(|path\.join\(|Path\([^)\n]*\)\s*/\s*)"
-    r"[^)\n]{0,80}\b(?:args|params|kwargs|request|req)\b",
+    r"(?:[^()\n]|\([^()\n]*\)){0,80}\b(?:args|params|kwargs|request|req)\b",
     re.IGNORECASE,
 )
 _ARG_DERIVED_ASSIGN = re.compile(
@@ -527,7 +601,13 @@ _ARG_DERIVED_ASSIGN = re.compile(
 )
 _PATH_JOIN_CALL = re.compile(r"os\.path\.join\(|path\.join\(|Path\([^)\n]*\)\s*/\s*", re.IGNORECASE)
 _FILE_OPEN_CALL = re.compile(
-    r"\bopen\(|\.read_text\(|\.write_text\(|readFile\(|writeFile\(|fs\.open\(",
+    # readFileSync/writeFileSync were missing entirely -- a Round 31
+    # (Holdout Set A) miss: gomission/mcp's real vulnerable sink is
+    # `fs.readFileSync(file, "utf8")` on a path built by SRC-018's own
+    # join+arg shape, and the bare (non-Sync) `readFile\(`/`writeFile\(`
+    # alternatives never match "readFileSync(" -- the Sync forms are an
+    # equally common real-world Node file-I/O idiom, same bug class.
+    r"\bopen\(|\.read_text\(|\.write_text\(|readFileSync\(|writeFileSync\(|readFile\(|writeFile\(|fs\.open\(",
 )
 _PATH_CONTAINMENT_CHECK = re.compile(
     r"realpath|resolve\(\)\.is_relative_to|is_relative_to\(|commonpath|"
@@ -1085,7 +1165,62 @@ _ROUTE_AUTH_DEPENDENCY = re.compile(
     re.IGNORECASE,
 )
 
-_SRC_EXTS = {".go", ".py", ".ts", ".js", ".cs", ".rs", ".swift"}
+# SRC-035: a secret-shaped constant (secret/token/password/credential/
+# api_key/auth_key in its own name) is defined as an env-var read OR-ed /
+# nullish-coalesced with a non-empty string literal fallback -- so if the
+# operator never sets the env var, the process boots with a real,
+# attacker-discoverable default credential instead of failing closed.
+# Derived from OjasKord/bizfile-mcp's real `const STATS_KEY =
+# process.env.STATS_KEY || 'ojas2026';`, which gates 4 admin/stats
+# endpoints and is also shipped in plaintext to any browser that loads the
+# server's own /dashboard page. Matches both the JS/TS `||`/`??` shape and
+# the Python `os.environ.get(...)`/`os.getenv(...)` two-argument shape. An
+# EMPTY-string fallback (`process.env.X || ''`) is deliberately excluded by
+# requiring at least one character inside the quotes -- that shape leaves
+# the value falsy/unset, not a real hardcoded credential, and is exactly
+# the adjacent, non-vulnerable line (`OWNER_KEY = process.env.OWNER_KEY ||
+# '';`) in the same real bizfile-mcp file this rule is derived from, so the
+# exclusion is validated against a true negative in the actual source, not
+# just reasoned about in the abstract. Deliberately uses compound terms
+# (api_key, auth_key, stats_key) rather than a bare "key" alternative,
+# which would false-positive on ordinary non-secret database/collection
+# key constants (primary_key, foreign_key, cache_key, sort_key).
+_ENV_FALLBACK_SECRET_NAME = re.compile(
+    r"secret|token|password|passwd|credential|api[_-]?key|auth[_-]?key|stats[_-]?key",
+    re.IGNORECASE,
+)
+_ENV_FALLBACK_SECRET_JS = re.compile(
+    r"\b(\w+)\s*=\s*process\.env\.\w+\s*(?:\|\||\?\?)\s*[\"']([^\"'\n]+)[\"']",
+)
+_ENV_FALLBACK_SECRET_PY = re.compile(
+    r"\b(\w+)\s*=\s*os\.(?:environ\.get|getenv)\(\s*[\"']\w+[\"']\s*,\s*[\"']([^\"'\n]+)[\"']\s*\)",
+)
+
+# SRC-036: the MCP SDK's own DNS-rebinding-protection flag is explicitly
+# disabled, either as an attribute assignment on a running server's
+# transport-security settings or as a constructor keyword argument. This
+# setting defaults to enabled in FastMCP specifically so a server has to
+# opt OUT of the protection; finding it turned off is about as direct and
+# unambiguous a red flag as a static rule can check -- verified against the
+# mcp SDK's own source (mcp/server/transport_security.py,
+# mcp/server/fastmcp/server.py). Derived from eren-solutions/mcp-security-
+# audit's real `mcp.settings.transport_security.<flag> = False` line --
+# notable because that project is itself a security-audit tool. (Worded
+# here, like SRC-013's comment, to avoid literally reproducing the trigger
+# substring, so this doc comment doesn't self-match the rule it describes.)
+_DNS_REBINDING_DISABLED = re.compile(
+    r"enable_dns_rebinding_protection\s*=\s*False\b"
+)
+
+_SRC_EXTS = {
+    ".go", ".py", ".ts", ".js", ".cs", ".rs", ".swift",
+    # Real Node/TS module-extension variants missing from the original
+    # allowlist -- confirmed as a live gap by Round 31 (gomission/mcp's
+    # entire source tree is .mjs; the scanner read zero bytes of that repo).
+    # .cjs/.mts/.cts are the same blind spot for CommonJS-explicit and
+    # TypeScript module-extension-aware packages, respectively.
+    ".mjs", ".cjs", ".mts", ".cts",
+}
 # Matched against whole PATH COMPONENTS (via Path.parts), not a substring of
 # the stringified path. Substring matching on e.g. "/test" also matches any
 # directory that merely starts with "test" (a real "testUtils/" package, or
@@ -2443,6 +2578,62 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                 "before_request middleware) to this route, or to the app "
                 "globally, before it accepts state-changing requests.",
                 9.1,
+            ))
+
+        # SRC-035: a secret-shaped constant falls back to a hardcoded,
+        # non-empty string when its env var is unset. Checked against both
+        # the JS/TS `||`/`??` shape and the Python `os.environ.get`/
+        # `os.getenv` two-argument shape; fires once per matching
+        # assignment (a file can define more than one such constant).
+        for efm in (*_ENV_FALLBACK_SECRET_JS.finditer(text), *_ENV_FALLBACK_SECRET_PY.finditer(text)):
+            var_name, fallback = efm.group(1), efm.group(2)
+            if not fallback.strip():
+                continue
+            if not _ENV_FALLBACK_SECRET_NAME.search(var_name):
+                continue
+            file_findings.append(SourceFinding(
+                "SRC-035", Severity.HIGH,
+                "Secret-shaped constant falls back to a hardcoded non-empty string when its env var is unset",
+                "A constant whose name reads as a credential "
+                "(secret/token/password/credential/api_key/auth_key) is "
+                "assigned from an environment variable, falling back to a "
+                "hardcoded, non-empty string literal if that variable is "
+                "never set. Any deployment where the operator forgets (or "
+                "never knows they need) to set the env var boots with a "
+                "real, guessable default credential instead of failing "
+                "closed -- and since the fallback value ships in the "
+                "repository's own source, it's public the moment the "
+                "repository is.",
+                f"{rel}:{_line_of(text, efm.start())}",
+                text[efm.start():efm.start() + 90].strip(),
+                "Never fall back to a non-empty literal for a credential. "
+                "Fail closed instead: raise/exit at startup if the env var "
+                "is unset, or fall back to an empty string/None so the "
+                "value is falsy and any check gating on it fails safe.",
+                7.5,
+            ))
+
+        # SRC-036: the MCP SDK's own DNS-rebinding-protection setting
+        # explicitly disabled.
+        drm = _DNS_REBINDING_DISABLED.search(text)
+        if drm:
+            file_findings.append(SourceFinding(
+                "SRC-036", Severity.HIGH,
+                "MCP SDK's DNS-rebinding protection explicitly disabled",
+                "This file explicitly turns off the MCP SDK's "
+                "`enable_dns_rebinding_protection` flag on the transport-"
+                "security settings. This protection "
+                "defaults to enabled precisely so a server has to opt OUT "
+                "of it -- disabling it removes the SDK's own defense "
+                "against a hostile webpage using a DNS-rebinding attack to "
+                "reach a listener the operator believes is local-only.",
+                f"{rel}:{_line_of(text, drm.start())}",
+                text[max(0, drm.start() - 20):drm.start() + 90].strip(),
+                "Remove this override and leave DNS-rebinding protection "
+                "enabled. If a specific host genuinely needs to bypass it, "
+                "use the SDK's allowed-hosts/allowed-origins configuration "
+                "instead of disabling the protection outright.",
+                8.1,
             ))
 
         # Apply inline suppression once per file: a finding whose flagged
