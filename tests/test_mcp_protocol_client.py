@@ -88,7 +88,10 @@ async def live_ssrf_mcp_server() -> AsyncIterator[str]:
 async def test_fetch_tools_via_mcp_retrieves_real_tool_definitions(live_mcp_server):
     from mcp_safeguard.server import _fetch_tools_via_mcp
 
-    tools = await _fetch_tools_via_mcp(live_mcp_server)
+    # live_mcp_server is http://127.0.0.1:<port>/mcp -- pin to that same
+    # loopback IP, mirroring what scan_mcp_server's resolve_pinned_ip step
+    # would produce for this target.
+    tools = await _fetch_tools_via_mcp(live_mcp_server, "127.0.0.1", "127.0.0.1")
 
     assert len(tools) == 1
     assert tools[0]["name"] == "add"
@@ -151,10 +154,14 @@ async def test_scan_mcp_server_blocks_hostname_that_resolves_to_private_ip(monke
     OTHER servers; it must not be present in its own outbound requests.
     """
     from mcp_safeguard import server as server_module
+    from mcp_safeguard.security.input_validator import ValidationError
 
-    monkeypatch.setattr(
-        server_module, "resolves_to_unsafe_ip", lambda host: host == "attacker-controlled.example"
-    )
+    def _fake_resolve_pinned_ip(host):
+        if host == "attacker-controlled.example":
+            raise ValidationError(f"SSRF blocked: '{host}' resolves to a private address.")
+        return "93.184.216.34"
+
+    monkeypatch.setattr(server_module, "resolve_pinned_ip", _fake_resolve_pinned_ip)
 
     called = {"fetch": False}
 

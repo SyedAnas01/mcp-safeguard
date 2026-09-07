@@ -353,6 +353,76 @@ async def test_gated_tool_rejects_unauthenticated_request_when_api_key_configure
     assert result == {"error": "Authentication required."}
 
 
+# ---------------------------------------------------------------------------
+# Auth enforcement — @mcp.resource handlers (Taig Mac Carthy, 2026-09-06)
+# ---------------------------------------------------------------------------
+#
+# _check_auth() was called by all 7 @mcp.tool functions but by none of the 3
+# @mcp.resource handlers, so security://reports/{scan_id}, security://rules,
+# and security://dashboard leaked full scan data (including credential
+# findings) to any caller when MCP_SAFEGUARD_API_KEY was configured -- the
+# exact protection the gated tools above already had.
+
+
+async def test_report_resource_rejects_unauthenticated_request_when_api_key_configured(
+    monkeypatch,
+):
+    from mcp_safeguard import server as server_module
+    from mcp_safeguard.config import settings
+
+    monkeypatch.setattr(settings, "api_key", "configured-secret-key")
+
+    scan_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    server_module._scan_history[scan_id] = {
+        "summary": {"scan_id": scan_id, "target": "http://internal-victim:9000"},
+        "credential_findings": [{"rule_id": "CRED-001", "evidence": "AKIA-REDACTED"}],
+    }
+
+    result = json.loads(await server_module.get_report_resource(scan_id))
+
+    assert result == {"error": "Authentication required."}
+
+
+async def test_rules_resource_rejects_unauthenticated_request_when_api_key_configured(
+    monkeypatch,
+):
+    from mcp_safeguard import server as server_module
+    from mcp_safeguard.config import settings
+
+    monkeypatch.setattr(settings, "api_key", "configured-secret-key")
+
+    result = json.loads(await server_module.get_rules_resource())
+
+    assert result == {"error": "Authentication required."}
+
+
+async def test_dashboard_resource_rejects_unauthenticated_request_when_api_key_configured(
+    monkeypatch,
+):
+    from mcp_safeguard import server as server_module
+    from mcp_safeguard.config import settings
+
+    monkeypatch.setattr(settings, "api_key", "configured-secret-key")
+
+    result = json.loads(await server_module.get_dashboard_resource())
+
+    assert result == {"error": "Authentication required."}
+
+
+async def test_resources_still_open_when_no_api_key_configured(monkeypatch):
+    """Open access (no api_key configured) must be preserved for resources,
+    exactly as it already is for tools -- local/stdio use with no auth
+    configured must not regress into requiring one."""
+    from mcp_safeguard import server as server_module
+    from mcp_safeguard.config import settings
+
+    monkeypatch.setattr(settings, "api_key", None)
+
+    result = json.loads(await server_module.get_dashboard_resource())
+
+    assert "error" not in result
+
+
 async def test_check_auth_returns_none_when_no_api_key_configured(monkeypatch):
     """Open access must be preserved when no api_key is configured (local/stdio use)."""
     from mcp_safeguard.config import settings

@@ -12,10 +12,13 @@ Control-flow bug in validate_host(): ValidationError subclasses ValueError,
     literal IP input to validate_host().
 """
 
+import socket
+
 import pytest
 
 from mcp_safeguard.security.input_validator import (
     ValidationError,
+    resolve_pinned_ip,
     resolves_to_unsafe_ip,
     validate_config_json,
     validate_host,
@@ -108,3 +111,68 @@ class TestDeeplyNestedJsonDoesNotCrash:
         nested = "[" * 10_000 + "]" * 10_000
         with pytest.raises(ValidationError, match="nesting depth"):
             validate_tool_json(nested, max_length=len(nested) + 10)
+
+
+class TestResolvePinnedIp:
+    """Taig Mac Carthy, 2026-09-06 (DNS-rebinding SSRF in scan_mcp_server):
+    resolves_to_unsafe_ip() validates a hostname by resolving it, but a
+    caller that then connects using the hostname STRING triggers a second,
+    independent DNS resolution -- an attacker's DNS server can answer that
+    second query differently from the first. resolve_pinned_ip() closes this
+    by resolving exactly once and handing back the single IP the caller must
+    actually connect to."""
+
+    def test_resolves_localhost_to_a_pinned_ip(self):
+        pinned = resolve_pinned_ip("localhost")
+        assert pinned in ("127.0.0.1", "::1")
+
+    def test_public_ip_literal_pins_to_itself(self):
+        assert resolve_pinned_ip("8.8.8.8") == "8.8.8.8"
+
+    def test_rejects_host_resolving_to_private_ip(self, monkeypatch):
+        def fake_getaddrinfo(host, port, *args, **kwargs):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        with pytest.raises(ValidationError, match="SSRF blocked"):
+            resolve_pinned_ip("private.example")
+
+    def test_rejects_if_any_of_multiple_resolved_addresses_is_unsafe(self, monkeypatch):
+        """Same conservative rule as resolves_to_unsafe_ip(): one unsafe
+        address among several rejects the whole hostname, not just that
+        record -- an attacker's DNS response can list a public address
+        alongside a private one and a client isn't guaranteed to pick the
+        first."""
+
+        def fake_getaddrinfo(host, port, *args, **kwargs):
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.1", 0)),
+            ]
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        with pytest.raises(ValidationError, match="SSRF blocked"):
+            resolve_pinned_ip("mixed.example")
+
+    def test_raises_on_resolution_failure(self, monkeypatch):
+        def fake_getaddrinfo(host, port, *args, **kwargs):
+            raise OSError("Name or service not known")
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        with pytest.raises(ValidationError, match="Could not resolve"):
+            resolve_pinned_ip("this-host-does-not-exist.invalid")
+
+    def test_resolves_host_exactly_once(self, monkeypatch):
+        """The whole point of resolve_pinned_ip(): a single resolution, not
+        one for validation and a second, independent one at connect time."""
+        calls = []
+
+        def fake_getaddrinfo(host, port, *args, **kwargs):
+            calls.append(host)
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        pinned = resolve_pinned_ip("rebind.attacker.test")
+
+        assert pinned == "93.184.216.34"
+        assert calls == ["rebind.attacker.test"]

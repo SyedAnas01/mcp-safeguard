@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from collections import OrderedDict
@@ -50,7 +51,7 @@ from mcp_safeguard.security.audit_logger import audit_logger
 from mcp_safeguard.security.auth_middleware import authenticate_request
 from mcp_safeguard.security.input_validator import (
     ValidationError,
-    resolves_to_unsafe_ip,
+    resolve_pinned_ip,
     sanitize_scan_id,
     validate_config_json,
     validate_host,
@@ -147,23 +148,120 @@ def _cap_string_fields(obj: Any, max_length: int) -> Any:
     return obj
 
 
-async def _fetch_tools_via_mcp(url: str, auth_token: str = "") -> list[dict[str, Any]]:
+class _PinnedSNITransport(httpx.AsyncHTTPTransport):
+    """
+    httpx transport that pins TLS SNI / certificate-hostname checking to a
+    fixed hostname regardless of what host the request's URL itself connects
+    to.
+
+    Used together with a connect URL whose host has been replaced by an
+    already-validated IP literal (see _pinned_connect_url): the real TCP
+    connection targets that literal IP directly -- an IP literal needs no DNS
+    resolution, so there is no second, independent lookup for an attacker's
+    DNS server to answer differently from the validation-time one -- while
+    TLS (when the scan target is https) still authenticates the server
+    against the real hostname's certificate via this pinned SNI value.
+    """
+
+    def __init__(self, *, sni_hostname: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._sni_hostname = sni_hostname
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        request.extensions.setdefault("sni_hostname", self._sni_hostname)
+        return await super().handle_async_request(request)
+
+
+def _pinned_connect_url(url: str, pinned_ip: str) -> str:
+    """
+    Rewrite `url` so its host is the literal `pinned_ip`, preserving scheme,
+    port, path, and query. This is the actual URL the connection is made to,
+    so it never triggers a DNS lookup of the original hostname.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host_literal = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+    netloc = host_literal if parsed.port is None else f"{host_literal}:{parsed.port}"
+    return parsed._replace(netloc=netloc).geturl()
+
+
+def _make_pinned_httpx_client_factory(original_host: str):
+    """
+    Build an `httpx_client_factory` for fastmcp's Client that routes every
+    request the underlying MCP session makes through _PinnedSNITransport, so
+    the connection-time TLS check stays anchored to `original_host` even
+    though the request URL itself now points at a pinned IP literal.
+    """
+
+    def factory(
+        headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+        **_kwargs: Any,
+    ) -> httpx.AsyncClient:
+        # fastmcp's StreamableHttpTransport/SSETransport always call this
+        # factory with follow_redirects=True as well (its own docstring:
+        # "must accept ... headers, auth, follow_redirects, and optionally
+        # timeout"); accept it via **_kwargs for forward compatibility
+        # instead of hardcoding the exact keyword set.
+        kwargs: dict[str, Any] = {
+            "follow_redirects": True,
+            "timeout": timeout or httpx.Timeout(settings.max_scan_timeout),
+            "transport": _PinnedSNITransport(
+                sni_hostname=original_host, verify=settings.verify_scan_target_tls
+            ),
+        }
+        if headers is not None:
+            kwargs["headers"] = headers
+        if auth is not None:
+            kwargs["auth"] = auth
+        return httpx.AsyncClient(**kwargs)
+
+    return factory
+
+
+async def _fetch_tools_via_mcp(
+    url: str, pinned_ip: str, original_host: str, auth_token: str = ""
+) -> list[dict[str, Any]]:
     """
     Fetch tool definitions from a target MCP server via the real MCP protocol
     handshake (initialize + tools/list), instead of an OpenAPI-style HTTP GET.
 
+    Connects to `pinned_ip` (the single, already-validated IP resolved once
+    by the caller via resolve_pinned_ip()), never re-resolving `original_host`
+    -- see _PinnedSNITransport and _pinned_connect_url for why this closes
+    the DNS-rebinding TOCTOU between validation and connection.
+
     Args:
-        url: The MCP server URL to connect to.
+        url: The MCP server URL originally requested (used only to preserve
+            scheme/port/path/query and to detect an SSE endpoint).
+        pinned_ip: The validated IP literal to actually connect to.
+        original_host: The original hostname, used for the Host header and
+            TLS SNI/certificate check so name-based routing and cert
+            validation keep working against the pinned-IP connection.
         auth_token: Optional bearer token to authenticate with the server.
 
     Returns:
         List of tool definition dicts ({"name", "description", "inputSchema"}),
         or an empty list on any connection/protocol failure.
     """
+    from urllib.parse import urlparse
+
     from fastmcp import Client
+    from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+
+    connect_url = _pinned_connect_url(url, pinned_ip)
+    is_sse = bool(re.search(r"/sse(/|\?|&|$)", urlparse(url).path))
+    transport_cls = SSETransport if is_sse else StreamableHttpTransport
 
     try:
-        client = Client(url, auth=auth_token or None, timeout=settings.max_scan_timeout)
+        transport = transport_cls(
+            url=connect_url,
+            headers={"Host": original_host},
+            httpx_client_factory=_make_pinned_httpx_client_factory(original_host),
+        )
+        client = Client(transport, auth=auth_token or None, timeout=settings.max_scan_timeout)
         async with client:
             mcp_tools = await client.list_tools()
         return [
@@ -259,16 +357,18 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
         rate_limit_hits.labels(client_id=client_id).inc()
         return {"error": "Rate limit exceeded. Please wait before scanning again."}
 
-    # Validate URL, then resolve its host and reject anything that lands on a
-    # private/reserved or cloud-metadata address. validate_url() alone only
-    # catches a LITERAL IP in that range (its own docstring notes hostname
-    # resolution "happens at scan time") -- without this second check here, a
-    # caller-supplied hostname that resolves to an internal/metadata address
-    # would reach _fetch_tools_via_mcp/the httpx fallback below completely
-    # unguarded, with any caller-supplied auth_token attached as a bearer
-    # header. This is the same SSRF/DNS-rebinding class the tool itself exists
-    # to detect in other servers (see EP-SSRF-001), so it must not be missing
-    # from the scanner's own outbound requests.
+    # Validate URL, then resolve its host ONCE and pin the connection to that
+    # single validated IP -- never the original hostname string. Resolving
+    # the host here and then connecting with the hostname (as this code used
+    # to) means the connect step re-resolves it independently; an attacker's
+    # DNS server can answer this validation lookup with a public IP and every
+    # later lookup with a private/internal one (DNS rebinding), so a check
+    # here alone doesn't guard what _fetch_tools_via_mcp/the httpx fallback
+    # below actually connect to. Pinning to the IP resolve_pinned_ip() already
+    # validated removes that second, attacker-controllable resolution
+    # entirely. This is the same SSRF/DNS-rebinding class the tool itself
+    # exists to detect in other servers (see EP-SSRF-001), so it must not be
+    # missing from the scanner's own outbound requests.
     try:
         from urllib.parse import urlparse
 
@@ -276,12 +376,11 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
 
         validate_url(url)
         target_host = urlparse(url).hostname or ""
-        if target_host and resolves_to_unsafe_ip(target_host):
+        try:
+            pinned_ip = resolve_pinned_ip(target_host)
+        except ValidationError:
             audit_logger.log_ssrf_blocked(client_id, url)
-            raise ValidationError(
-                f"SSRF blocked: '{target_host}' resolves to a private/reserved "
-                "or cloud-metadata address."
-            )
+            raise
     except ValidationError as e:
         audit_logger.log_validation_error(client_id, "url", str(e))
         return {"error": f"Invalid scan target: {e}"}
@@ -294,7 +393,7 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
     active_scans.inc()
 
     try:
-        headers: dict[str, str] = {}
+        headers: dict[str, str] = {"Host": target_host}
         if auth_token:
             headers["Authorization"] = f"Bearer {auth_token}"
 
@@ -304,10 +403,13 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
         scan_warnings: list[str] = []
 
         # Try the real MCP protocol handshake (initialize + tools/list) first.
-        tool_definitions = await _fetch_tools_via_mcp(url, auth_token)
+        # Connects to pinned_ip (see resolve_pinned_ip above), never
+        # re-resolving target_host.
+        tool_definitions = await _fetch_tools_via_mcp(url, pinned_ip, target_host, auth_token)
 
         # Fall back to the legacy OpenAPI-style probe only if that yielded nothing.
         if not tool_definitions:
+            connect_url = _pinned_connect_url(url, pinned_ip)
             async with httpx.AsyncClient(
                 timeout=settings.max_scan_timeout,
                 headers=headers,
@@ -317,7 +419,13 @@ async def scan_mcp_server(url: str, auth_token: str = "") -> dict[str, Any]:
                 verify=settings.verify_scan_target_tls,
             ) as client:
                 try:
-                    resp = await client.get(f"{url}/tools")
+                    # extensions={"sni_hostname": ...} keeps TLS SNI/cert
+                    # validation anchored to target_host even though the URL
+                    # itself now points at the pinned IP -- see
+                    # _PinnedSNITransport's docstring for the full reasoning.
+                    resp = await client.get(
+                        f"{connect_url}/tools", extensions={"sni_hostname": target_host}
+                    )
                     if resp.status_code == 200:
                         data = resp.json()
                         tool_definitions = (
@@ -862,6 +970,10 @@ async def compare_scans(scan_id_1: str, scan_id_2: str) -> dict[str, Any]:
 @mcp.resource("security://reports/{scan_id}")
 async def get_report_resource(scan_id: str) -> str:
     """Full JSON security report for a completed scan."""
+    err, _client_id = _check_auth()
+    if err is not None:
+        return json.dumps(err)
+
     try:
         validated_id = sanitize_scan_id(scan_id)
     except ValidationError as e:
@@ -880,6 +992,10 @@ async def get_report_resource(scan_id: str) -> str:
 @mcp.resource("security://rules")
 async def get_rules_resource() -> str:
     """All active detection rules across all scanner modules."""
+    err, _client_id = _check_auth()
+    if err is not None:
+        return json.dumps(err)
+
     from mcp_safeguard.scanner.credential_scanner import (
         _CREDENTIAL_PATTERNS,
         _OAUTH_SCOPE_RISKS,
@@ -939,6 +1055,10 @@ async def get_rules_resource() -> str:
 @mcp.resource("security://dashboard")
 async def get_dashboard_resource() -> str:
     """Aggregate statistics across all scans."""
+    err, _client_id = _check_auth()
+    if err is not None:
+        return json.dumps(err)
+
     total_scans = len(_scan_history)
     total_findings = 0
     severity_counts: dict[str, int] = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
