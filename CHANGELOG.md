@@ -2,6 +2,36 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.9.3] - 2026-09-07
+
+### Fixed — same DNS-rebinding SSRF shape as the 0.9.1 fix, in a second scanner
+
+`endpoint_scanner.py`'s `scan_endpoints()` had the identical TOCTOU gap the 0.9.1 fix closed in
+`scan_mcp_server()`, just never touched by that fix: it validated a hostname was safe once, then
+reconnected using the raw hostname string (`socket.create_connection((host, port))` in
+`_port_open()`, and the httpx client's `GET` for all 27 sensitive-path probes) — each independently
+re-resolving the hostname at connect time, letting a DNS-rebinding attacker present a safe address
+for validation and a private one for the actual connection. Confirmed with a real reproduction
+before fixing: 12/12 dangerous-port probes reached a rebound private listener directly, 0 reached
+the validated target. Fixed by reusing the same `resolve_pinned_ip()` helper the 0.9.1 fix already
+added — resolve once, pin the connection to that IP, keep the `Host` header and SNI correct for
+virtual hosting. After the fix: `getaddrinfo` is called exactly once per scan, 0 requests reach the
+rebound target.
+
+### Fixed — CI could not block a broken release from publishing
+
+The actual root cause of how 0.9.1 shipped broken: `ci.yml` and `publish.yml` ran fully
+independently, so a red CI run on a release commit could not, and did not, stop that commit from
+being published to PyPI. `publish.yml` now runs its own `test` job (same 3.11/3.12/3.13 matrix as
+CI) and the publish step depends on it — a release can no longer ship without its own tests
+passing, this time enforced structurally rather than by a human watching two separate workflows.
+
+### Added — Python 3.13 to the CI test matrix
+
+`pyproject.toml` has never capped supported Python versions, so `pip install mcp-safeguard` on
+3.13 already worked — CI just never tested it. Added, and confirmed clean: 252/252 tests pass on
+3.11, 3.12, and 3.13 alike, checked directly in matching containers before this was trusted.
+
 ## [0.9.2] - 2026-09-07
 
 ### Fixed — regression in 0.9.1: the DNS-rebinding SSRF fix's pinned MCP connection silently
