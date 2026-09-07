@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import httpx2
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 
@@ -148,11 +149,23 @@ def _cap_string_fields(obj: Any, max_length: int) -> Any:
     return obj
 
 
-class _PinnedSNITransport(httpx.AsyncHTTPTransport):
+class _PinnedSNITransport(httpx2.AsyncHTTPTransport):
     """
-    httpx transport that pins TLS SNI / certificate-hostname checking to a
+    httpx2 transport that pins TLS SNI / certificate-hostname checking to a
     fixed hostname regardless of what host the request's URL itself connects
     to.
+
+    Built on httpx2 (not the classic httpx package) because fastmcp/mcp's
+    Client and its McpHttpClientFactory protocol (mcp.shared._httpx_utils)
+    are built on httpx2 internally -- an httpx_client_factory is required to
+    return an httpx2.AsyncClient and accept an httpx2.Timeout. httpx and
+    httpx2 are separate, non-interoperable packages (distinct Timeout/Client
+    classes despite the same names), so building this transport/client pair
+    on classic httpx silently misconstructs the timeout passed in by
+    fastmcp -- the resulting httpx.Timeout wraps an httpx2.Timeout object
+    instead of a float, which only breaks deep inside httpcore's connect
+    path (TypeError in anyio.fail_after), long after client construction
+    succeeds. See _make_pinned_httpx_client_factory.
 
     Used together with a connect URL whose host has been replaced by an
     already-validated IP literal (see _pinned_connect_url): the real TCP
@@ -167,7 +180,7 @@ class _PinnedSNITransport(httpx.AsyncHTTPTransport):
         super().__init__(**kwargs)
         self._sni_hostname = sni_hostname
 
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
         request.extensions.setdefault("sni_hostname", self._sni_hostname)
         return await super().handle_async_request(request)
 
@@ -192,14 +205,18 @@ def _make_pinned_httpx_client_factory(original_host: str):
     request the underlying MCP session makes through _PinnedSNITransport, so
     the connection-time TLS check stays anchored to `original_host` even
     though the request URL itself now points at a pinned IP literal.
+
+    Returns an httpx2.AsyncClient (not httpx.AsyncClient) -- see
+    _PinnedSNITransport's docstring for why the two packages cannot be mixed
+    here.
     """
 
     def factory(
         headers: dict[str, str] | None = None,
-        timeout: httpx.Timeout | None = None,
-        auth: httpx.Auth | None = None,
+        timeout: httpx2.Timeout | None = None,
+        auth: httpx2.Auth | None = None,
         **_kwargs: Any,
-    ) -> httpx.AsyncClient:
+    ) -> httpx2.AsyncClient:
         # fastmcp's StreamableHttpTransport/SSETransport always call this
         # factory with follow_redirects=True as well (its own docstring:
         # "must accept ... headers, auth, follow_redirects, and optionally
@@ -207,7 +224,7 @@ def _make_pinned_httpx_client_factory(original_host: str):
         # instead of hardcoding the exact keyword set.
         kwargs: dict[str, Any] = {
             "follow_redirects": True,
-            "timeout": timeout or httpx.Timeout(settings.max_scan_timeout),
+            "timeout": timeout or httpx2.Timeout(settings.max_scan_timeout),
             "transport": _PinnedSNITransport(
                 sni_hostname=original_host, verify=settings.verify_scan_target_tls
             ),
@@ -216,7 +233,7 @@ def _make_pinned_httpx_client_factory(original_host: str):
             kwargs["headers"] = headers
         if auth is not None:
             kwargs["auth"] = auth
-        return httpx.AsyncClient(**kwargs)
+        return httpx2.AsyncClient(**kwargs)
 
     return factory
 
@@ -272,7 +289,22 @@ async def _fetch_tools_via_mcp(
             }
             for t in mcp_tools
         ]
-    except Exception:
+    except Exception as e:
+        # Deliberately still returns [] so a genuinely-unreachable target
+        # (nothing listening, network timeout) degrades to the scan's normal
+        # "no tools retrievable" warning path instead of failing the whole
+        # tool call -- but the failure itself must not be silent: logging it
+        # here is what makes a real bug in this connection path (as opposed
+        # to a target that's actually down) diagnosable, instead of looking
+        # identical to "found nothing".
+        logger.warning(
+            "_fetch_tools_via_mcp: MCP protocol fetch against %s (pinned to %s) "
+            "failed: %s: %s",
+            url,
+            pinned_ip,
+            type(e).__name__,
+            e,
+        )
         return []
 
 

@@ -2,6 +2,64 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.9.2] - 2026-09-07
+
+### Fixed — regression in 0.9.1: the DNS-rebinding SSRF fix's pinned MCP connection silently
+### returned zero tools against every real target
+
+**Be direct about this: 0.9.1 shipped broken.** Its own real CI run on the release commit
+(`77db556`) failed 3 tests in `tests/test_mcp_protocol_client.py` — `pip install -e ".[dev]"`
+had already been run fresh minutes earlier as part of cutting that same release, so this was not
+a flaky or unrelated failure, it was the actual release commit failing its own test suite. The
+release was published to PyPI anyway (a gap in how these two release steps are sequenced, not
+something either step did wrong on its own — the CI failure should have blocked the publish
+step and did not). Every real MCP-protocol scan run under 0.9.1 (`scan_mcp_server` against any
+target, `_fetch_tools_via_mcp` directly) silently found **zero tools**, indistinguishable from
+"nothing is listening" — prompt-injection, SSRF, and tool-poisoning checks were silently skipped
+on every scan, because they only run over retrieved tool definitions.
+
+**Root cause — not what it looked like.** The failure pattern (a real local MCP test server,
+reachable and correct, scanned via the new pinned-IP connection, returning 0 tools every time)
+looked like it should be an IPv4/IPv6 resolution-order or Linux-vs-macOS quirk in the new
+`resolve_pinned_ip()`/pinned-connection code from the 0.9.1 SSRF fix. It reproduced identically
+on Linux (`python:3.11-slim` and `python:3.12-slim`, matching CI's own images) and on macOS,
+ruling that out. The real cause: `fastmcp`'s `Client` and the `mcp` SDK's
+`McpHttpClientFactory` protocol (`mcp.shared._httpx_utils`) build all of their actual HTTP
+traffic on a separate PyPI package, `httpx2` (a distinct v2 rewrite with its own `Timeout`/
+`AsyncClient`/`AsyncHTTPTransport` classes and its own `httpcore2` backend — not interchangeable
+with the classic `httpx` package despite identical class names), and require an
+`httpx_client_factory` to build and return an `httpx2.AsyncClient`. 0.9.1's new
+`_PinnedSNITransport`/`_make_pinned_httpx_client_factory` were built on classic `httpx`
+(`httpx.AsyncHTTPTransport`, `httpx.AsyncClient`, `httpx.Timeout`) instead. Handing an
+`httpx2.Timeout` object to `httpx.AsyncClient(timeout=...)` doesn't raise — it silently
+misconstructs the client's internal timeout, which only breaks several layers down inside
+`httpcore`'s connect path (`TypeError: unsupported operand type(s) for +: 'float' and 'Timeout'`
+inside `anyio.fail_after`), long after the client is built and the scan looks like it's running
+normally. The 0.9.1 code that predates this fix never hit this because it never built its own
+httpx client at all — it let `fastmcp`/`mcp` use their own internal (`httpx2`-based) default.
+
+**Fixed** by rebuilding `_PinnedSNITransport` and `_make_pinned_httpx_client_factory` on
+`httpx2` instead of `httpx` (`httpx2.AsyncHTTPTransport`, `httpx2.AsyncClient`,
+`httpx2.Timeout`), matching what `McpHttpClientFactory` actually requires; `httpx2` is now an
+explicit dependency instead of an unlisted transitive one. The DNS-rebinding pinning logic
+itself (resolve-once, connect-to-literal-IP, pin SNI/Host to the original hostname) is
+unchanged — this was a wrong-HTTP-library bug in how the pinned connection was built, not a
+weakening of the SSRF fix.
+
+**Also fixed, a real second bug found investigating the first:** `_fetch_tools_via_mcp` caught
+every exception from the connection attempt and returned an empty list with no logging at all —
+a genuinely-unreachable target and a real bug in this project's own connection code were
+completely indistinguishable from the caller's side, which is exactly what let the regression
+above ship looking like a passing local run. The empty-list-on-failure behavior itself is kept
+(a scan against a target that's actually down must still degrade to the existing "no tools
+retrievable" warning, not fail the whole tool call) but the underlying exception is now logged,
+so a future failure in this path is diagnosable instead of silently identical to "found nothing."
+
+Verified: full test suite (250/250) run directly inside `python:3.11-slim` and `python:3.12-slim`
+containers matching CI's own job matrix (not just locally), ruff clean. The DNS-rebinding SSRF
+and resource-auth fixes from 0.9.1 were independently re-verified against this fix using the
+same repro scripts used to confirm them originally — both still hold.
+
 ## [0.9.1] - 2026-09-07
 
 ### Fixed — 2 real vulnerabilities reported by an external researcher, Taig Mac Carthy (@t4dhg)
