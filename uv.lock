@@ -1025,7 +1025,7 @@ wheels = [
 
 [[package]]
 name = "mcp-safeguard"
-version = "0.7.3"
+version = "0.9.1"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },

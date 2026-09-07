@@ -2,6 +2,41 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.9.1] - 2026-09-07
+
+### Fixed — 2 real vulnerabilities reported by an external researcher, Taig Mac Carthy (@t4dhg)
+
+Taig Mac Carthy independently audited this project (in exchange for us fixing 4 real findings
+he'd reported against his own `mcp-factorial`) and reported 2 new, working, reproduced bugs
+against commit `02f0ed5` (v0.9.0). Both confirmed with real before/after reproductions, both fixed.
+
+- **DNS-rebinding SSRF in `scan_mcp_server` (HIGH).** `resolves_to_unsafe_ip(target_host)`
+  validated the scan target's hostname, but the actual connection — both the fastmcp `Client`
+  path and the httpx `/tools` fallback — re-resolved that same hostname independently at
+  connect time. An attacker-controlled DNS name can answer the validation-time lookup with a
+  public IP and every later lookup with a private/internal one (classic TOCTOU), turning the
+  scanner itself into an SSRF proxy into whatever network it runs on. Fixed by resolving the
+  host exactly once (new `resolve_pinned_ip()`), and pinning every actual connection to that
+  literal IP — never the hostname again — via a custom httpx transport that keeps TLS SNI/
+  cert-hostname checking and the `Host` header anchored to the real hostname.
+- **Auth bypass on all 3 `@mcp.resource` handlers (MEDIUM, broader than reported).** Taig named
+  `security://reports/{scan_id}`; re-verification found the same gap on `security://rules` and
+  `security://dashboard` too — `_check_auth()` was called by all 7 `@mcp.tool` functions but by
+  none of the 3 resource handlers, so a caller blocked from the equivalent tool call could read
+  the same data, including credential findings, unauthenticated when `MCP_SAFEGUARD_API_KEY`
+  was configured. Fixed by adding the same `_check_auth()` guard to all 3 resources.
+
+Taig also independently reproduced the pre-existing PyPI-stuck-at-0.4.0 problem as a live,
+active vulnerability — the IPv4-mapped-IPv6 SSRF bypass and stored-XSS bugs this changelog's
+0.7.1/0.6.1 entries already describe as fixed are still exploitable in the wheel PyPI actually
+serves. This release is also the PyPI catch-up those entries called for: everything from 0.5.0
+through 0.9.0 plus both fixes above.
+
+Verified with the supplied repro scripts against the real pre-fix and post-fix code (both bugs
+confirmed exploitable before, both fail to reproduce after) and the full test suite: 250 passed
+(up from 240), 6 new tests for `resolve_pinned_ip()`, 4 new tests for resource auth. Ruff clean.
+Full technical writeup: `SECURITY_FIXES_TAIG_2026-09-06.md`.
+
 ## [0.9.0] - 2026-09-03
 
 ### Documentation — benchmarking discipline
