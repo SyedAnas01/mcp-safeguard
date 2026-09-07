@@ -390,7 +390,7 @@ Output:
 
 ## Detection Coverage
 
-**148 detection rules** across seven categories — prompt injection (15 + 4 schema-risk) + credentials (31) + tool poisoning (11) + SSRF (3) + source-audit (36) + endpoint exposure (29 paths + 12 ports + 5 response-leak escalations) + OAuth scope risks (7). This count is generated from the code itself (the `security://rules` MCP resource sums every active pattern list at call time) rather than hand-maintained here, specifically so this table can't go stale the way earlier versions of it did — query that resource for the live, authoritative number.
+Detection rules across seven categories: prompt injection, credentials, tool poisoning, SSRF, source-audit, endpoint exposure, and OAuth scope risks. The exact count changes across releases — query the `security://rules` MCP resource at runtime for the live, authoritative number rather than trusting any figure quoted here or elsewhere.
 
 | Category | Rules | Patterns |
 |----------|-------|---------|
