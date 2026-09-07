@@ -188,3 +188,64 @@ Files changed:
 - `tests/test_input_validator.py`, `tests/test_server.py` — new regression tests
 - `tests/test_mcp_protocol_client.py` — updated 2 existing tests for the new
   `_fetch_tools_via_mcp` signature and `resolve_pinned_ip`-based validation
+
+## Addendum (2026-09-07) — the flagged `endpoint_scanner.py` scope gap, fixed
+
+The "Note on scope" above flagged `scan_endpoints()` as having the same
+validate-then-reconnect-by-hostname shape as Bug 1. Investigated and
+confirmed for real, independently of this fix work (checked `git log` on
+`src/mcp_safeguard/scanner/endpoint_scanner.py` first: last touched at
+v0.6.0, commit `098612e`, completely untouched by the Bug 1 fix above).
+
+**The bug:** `scan_endpoints()` called `_resolves_to_unsafe_ip(host)` (a
+boolean gate wrapping the shared `resolves_to_unsafe_ip()`) once, then
+reconnected using the original hostname string in two places — `_port_open()`
+via `socket.create_connection((host, port))`, and the httpx client's
+`client.get(f"{base_url}{path}")` for every entry in `_SENSITIVE_PATHS`. Both
+independently re-resolve `host` at connect time, the same DNS-rebinding
+TOCTOU as Bug 1.
+
+**Reproduced before fixing anything**, mirroring `repro_claim1_dns_rebind.py`'s
+fake-DNS state machine (first `getaddrinfo()` call for the fake hostname
+answers with a validation-time-safe address, every later call rebinds to a
+private double): with the code unmodified, all 12 dangerous-port probes
+(`_port_open`) reached the private double directly — 0 reached the real
+validated target, and `scan_endpoints()` returned no SSRF-blocked finding.
+`socket.getaddrinfo` was called 42 times for the one fake hostname across a
+single scan. After the fix: `getaddrinfo` is called exactly once, and the
+private double receives 0 connections.
+
+**The fix:** same approach as Bug 1 — resolve `host` once via
+`resolve_pinned_ip()` (the exact same shared helper, reused, not
+reimplemented) right after the `_is_ssrf_safe()` allowlist check, and pin
+every actual connection to that single IP:
+- `_port_open()` is now called with the pinned IP instead of `host`.
+- The httpx client now connects to a URL with the pinned IP substituted in,
+  while an explicit `Host` header and a per-request
+  `extensions={"sni_hostname": host}` keep virtual-hosting and TLS
+  SNI/certificate checks anchored to the real hostname — the same pattern
+  `server.py`'s own httpx fallback client already uses, just without a
+  custom transport class (not needed here since this module builds its own
+  plain `httpx.AsyncClient` directly, unlike `server.py`'s fastmcp-`Client`
+  path).
+- `_resolves_to_unsafe_ip()`/`resolves_to_unsafe_ip()` are left in place,
+  unused by `scan_endpoints()` now but still covered by their own direct
+  tests, same as Bug 1 left `resolves_to_unsafe_ip()` itself untouched.
+
+**Tests:** added `TestScanEndpointsDoesNotReopenDNSRebindingTOCTOU` (2 tests)
+to `tests/test_endpoint_scanner.py` — one asserting the original hostname is
+resolved exactly once through the real `scan_endpoints()` entry point
+(mirrors `TestResolvePinnedIp.test_resolves_host_exactly_once`), one an
+end-to-end rebind reproduction asserting a private double never receives a
+connection. Both fail against the unfixed code (verified by stashing just the
+source fix and re-running — 2 failed, 14 passed) and pass against the fix.
+Full suite: **252 passed, 0 failed** (was 250; +2 new). `ruff check` on both
+changed files: clean.
+
+Files changed:
+- `src/mcp_safeguard/scanner/endpoint_scanner.py` — `scan_endpoints()` now
+  calls `resolve_pinned_ip()` once and pins `_port_open`/httpx connections to
+  that IP; new `_ssrf_blocked_finding()` helper factors out the
+  previously-duplicated EP-SSRF-001 finding construction.
+- `tests/test_endpoint_scanner.py` — new
+  `TestScanEndpointsDoesNotReopenDNSRebindingTOCTOU` regression tests.
