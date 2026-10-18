@@ -7,6 +7,8 @@
 
 Detect prompt injection · credential leaks · exposed endpoints · tool poisoning
 
+Maintained by [Syed Anas Mohiuddin](https://cognivators.com/founder) at [Cognivators](https://cognivators.com). Public vulnerability record: [cognivators.com/research](https://cognivators.com/research)
+
 > 🔎 **Found [CVE-2026-14540](https://github.com/googleapis/mcp-toolbox/pull/3448) — a server-side request forgery in Google's official MCP Toolbox. Google shipped the fix and credited the report.**
 
 [![PyPI version](https://badge.fury.io/py/mcp-safeguard.svg)](https://pypi.org/project/mcp-safeguard/)
