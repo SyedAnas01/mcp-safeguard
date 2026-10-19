@@ -2,6 +2,14 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.9.4] - 2026-10-19
+
+### Changed
+
+Metadata only, no scanner behaviour changes. Project links on PyPI now point to https://cognivators.com
+and https://cognivators.com/research, the author contact is updated, and the registry manifest
+(`server.json`) and `CITATION.cff` version fields now match the released version.
+
 ## [0.9.3] - 2026-09-07
 
 ### Fixed — same DNS-rebinding SSRF shape as the 0.9.1 fix, in a second scanner

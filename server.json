@@ -6,7 +6,7 @@
     "url": "https://github.com/SyedAnas01/mcp-safeguard",
     "source": "github"
   },
-  "version": "0.3.2",
+  "version": "0.9.4",
   "homepage": "https://cognivators.com",
   "license": "MIT",
   "author": {
@@ -32,7 +32,7 @@
     {
       "registryType": "pypi",
       "identifier": "mcp-safeguard",
-      "version": "0.3.2",
+      "version": "0.9.4",
       "transport": {
         "type": "stdio"
       },
