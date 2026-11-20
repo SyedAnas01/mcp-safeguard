@@ -1,0 +1,57 @@
+name: Action dogfood
+
+on:
+  push:
+    paths:
+      - 'action.yml'
+      - '.github/workflows/action-dogfood.yml'
+      - 'examples/**'
+  pull_request:
+    paths:
+      - 'action.yml'
+      - '.github/workflows/action-dogfood.yml'
+      - 'examples/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  config-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan demo vulnerable config
+        uses: ./
+        with:
+          mode: scan
+          path: examples/demo-vulnerable-config.json
+          fail-on: CRITICAL
+          format: json
+          output: config-findings.json
+          upload-sarif: 'false'
+          continue-on-error: 'true'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: config-findings
+          path: config-findings.json
+
+  source-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan own source (SARIF)
+        uses: ./
+        with:
+          mode: scan-source
+          path: .
+          fail-on: CRITICAL
+          format: sarif
+          output: source-findings.sarif
+          upload-sarif: 'false'
+          continue-on-error: 'true'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-findings
+          path: source-findings.sarif

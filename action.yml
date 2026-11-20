@@ -1,0 +1,133 @@
+name: 'MCP Safeguard'
+description: >-
+  Scan MCP configs and server source for prompt injection, credential leaks,
+  SSRF, tool poisoning, and source-level credential-handling flaws.
+author: 'Syed Anas Mohiuddin / Cognivators'
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  mode:
+    description: >-
+      scan = MCP config/tool JSON; scan-source = walk a server source tree.
+    required: false
+    default: 'scan-source'
+  path:
+    description: >-
+      Target path. For scan: config JSON. For scan-source: directory (usually .).
+    required: false
+    default: '.'
+  fail-on:
+    description: 'Exit non-zero if any finding is at or above this severity.'
+    required: false
+    default: 'HIGH'
+  severity:
+    description: 'Minimum severity to report (CRITICAL|HIGH|MEDIUM|LOW|INFO).'
+    required: false
+    default: 'INFO'
+  format:
+    description: 'Output format: text, json, or sarif.'
+    required: false
+    default: 'sarif'
+  output:
+    description: 'Report file path (use .sarif / .json / .html).'
+    required: false
+    default: 'mcp-safeguard-results.sarif'
+  version:
+    description: 'PyPI version of mcp-safeguard to install (empty = latest).'
+    required: false
+    default: ''
+  python-version:
+    description: 'Python version for the runner.'
+    required: false
+    default: '3.12'
+  upload-sarif:
+    description: 'Upload SARIF to GitHub Code Scanning when format=sarif.'
+    required: false
+    default: 'true'
+  continue-on-error:
+    description: 'If true, do not fail the job when findings exceed fail-on.'
+    required: false
+    default: 'false'
+
+outputs:
+  report-path:
+    description: 'Path to the written report file.'
+    value: ${{ steps.scan.outputs.report-path }}
+  exit-code:
+    description: 'Scanner exit code (0 = clean under fail-on threshold).'
+    value: ${{ steps.scan.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install mcp-safeguard
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -n "${{ inputs.version }}" ]; then
+          pip install --quiet "mcp-safeguard==${{ inputs.version }}"
+        else
+          pip install --quiet mcp-safeguard
+        fi
+        mcp-safeguard version || true
+
+    - name: Run mcp-safeguard
+      id: scan
+      shell: bash
+      run: |
+        set -uo pipefail
+        MODE="${{ inputs.mode }}"
+        PATH_ARG="${{ inputs.path }}"
+        FAIL_ON="${{ inputs.fail-on }}"
+        SEVERITY="${{ inputs.severity }}"
+        FORMAT="${{ inputs.format }}"
+        OUTPUT="${{ inputs.output }}"
+        CONTINUE="${{ inputs.continue-on-error }}"
+
+        case "$MODE" in
+          scan|scan-source) ;;
+          *)
+            echo "::error::mode must be 'scan' or 'scan-source' (got: $MODE)"
+            exit 2
+            ;;
+        esac
+
+        CMD=(mcp-safeguard "$MODE" "$PATH_ARG"
+          --severity "$SEVERITY"
+          --fail-on "$FAIL_ON"
+          --format "$FORMAT"
+          --output "$OUTPUT")
+
+        echo "Running: ${CMD[*]}"
+        set +e
+        "${CMD[@]}"
+        CODE=$?
+        set -e
+
+        echo "report-path=$OUTPUT" >> "$GITHUB_OUTPUT"
+        echo "exit-code=$CODE" >> "$GITHUB_OUTPUT"
+
+        if [ "$CODE" -ne 0 ] && [ "$CONTINUE" != "true" ]; then
+          echo "::error::mcp-safeguard exited $CODE (fail-on=$FAIL_ON)"
+          exit "$CODE"
+        fi
+        if [ "$CODE" -ne 0 ]; then
+          echo "::warning::mcp-safeguard exited $CODE; continue-on-error=true"
+        fi
+
+    - name: Upload SARIF to code scanning
+      if: >-
+        inputs.upload-sarif == 'true' &&
+        inputs.format == 'sarif' &&
+        hashFiles(inputs.output) != ''
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output }}
+        category: mcp-safeguard

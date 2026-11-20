@@ -288,12 +288,34 @@ Drop mcp-safeguard into your pipeline so MCP configs are scanned on every change
 ```yaml
 repos:
   - repo: https://github.com/SyedAnas01/mcp-safeguard
-    rev: v0.3.0
+    rev: v0.9.4
     hooks:
       - id: mcp-safeguard
 ```
 
-**GitHub Actions** (`.github/workflows/mcp-security.yml`):
+**GitHub Action** (Marketplace-ready — preferred):
+
+```yaml
+name: MCP Security Scan
+on: [push, pull_request]
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  mcp-safeguard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: SyedAnas01/mcp-safeguard@v0.9.4
+        with:
+          mode: scan-source          # or: scan
+          path: .                    # or: mcp.json / claude config
+          fail-on: HIGH
+          format: sarif
+          output: mcp-safeguard-results.sarif
+```
+
+**GitHub Actions** (inline CLI, no Action):
 
 ```yaml
 name: MCP Security Scan
