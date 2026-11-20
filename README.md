@@ -288,7 +288,7 @@ Drop mcp-safeguard into your pipeline so MCP configs are scanned on every change
 ```yaml
 repos:
   - repo: https://github.com/SyedAnas01/mcp-safeguard
-    rev: v0.3.0
+    rev: v0.9.4
     hooks:
       - id: mcp-safeguard
 ```
