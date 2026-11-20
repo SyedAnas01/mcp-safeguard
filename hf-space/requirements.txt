@@ -1,0 +1,2 @@
+mcp-safeguard>=0.9.4
+gradio>=4.0
