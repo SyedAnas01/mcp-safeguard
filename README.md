@@ -306,7 +306,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: SyedAnas01/mcp-safeguard@v0.9.4
+      - uses: SyedAnas01/mcp-safeguard@v0.9.5
         with:
           mode: scan-source          # or: scan
           path: .                    # or: mcp.json / claude config
