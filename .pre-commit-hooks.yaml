@@ -3,9 +3,11 @@
 #
 #   repos:
 #     - repo: https://github.com/SyedAnas01/mcp-safeguard
-#       rev: v0.9.4
+#       rev: v0.9.4   # pin to a release tag that includes this file
 #       hooks:
 #         - id: mcp-safeguard
+#
+# Install: pre-commit install && pre-commit run mcp-safeguard --all-files
 #
 - id: mcp-safeguard
   name: mcp-safeguard (MCP security scan)

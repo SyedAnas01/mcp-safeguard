@@ -25,6 +25,19 @@ pip install mcp-safeguard
 mcp-safeguard scan your-config.json
 ```
 
+**CI (drop-in GitHub Action):**
+
+```yaml
+- uses: SyedAnas01/mcp-safeguard@v0.9.6
+  with:
+    mode: scan-source   # or: scan
+    path: .
+    fail-on: HIGH
+    format: sarif
+```
+
+**pre-commit:** `rev: v0.9.4` · **Homebrew:** `brew tap SyedAnas01/mcp-safeguard && brew install mcp-safeguard`
+
 </div>
 
 ---
@@ -282,21 +295,12 @@ fastmcp run src/mcp_safeguard/server.py --transport sse --port 8000
 
 ## CI/CD Integration
 
-Drop mcp-safeguard into your pipeline so MCP configs are scanned on every change. It exits non-zero when it finds issues at or above your chosen severity, so a vulnerable config fails the build.
+Canonical kit — copy-paste and ship. The Action exits non-zero at/above your `fail-on` severity and can upload SARIF to GitHub Code Scanning.
 
-**pre-commit** (`.pre-commit-config.yaml`):
-
-```yaml
-repos:
-  - repo: https://github.com/SyedAnas01/mcp-safeguard
-    rev: v0.9.4
-    hooks:
-      - id: mcp-safeguard
-```
-
-**GitHub Action** (Marketplace-ready — preferred):
+### GitHub Action (preferred)
 
 ```yaml
+# .github/workflows/mcp-safeguard.yml
 name: MCP Security Scan
 on: [push, pull_request]
 permissions:
@@ -307,32 +311,53 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: SyedAnas01/mcp-safeguard@v0.9.5
+      - uses: SyedAnas01/mcp-safeguard@v0.9.6
         with:
-          mode: scan-source          # or: scan
-          path: .                    # or: mcp.json / claude config
+          mode: scan-source          # or: scan (config JSON)
+          path: .                    # or: mcp.json / claude_desktop_config.json
           fail-on: HIGH
           format: sarif
           output: mcp-safeguard-results.sarif
+          # continue-on-error: 'true'  # soft gate while tuning
 ```
 
-**GitHub Actions** (inline CLI, no Action):
+Marketplace: [mcp-safeguard Action](https://github.com/marketplace/actions/mcp-safeguard) · tag `@v0.9.6`
+
+### pre-commit (second install vector)
+
+Every commit that touches an MCP config pulls PyPI via the hook:
 
 ```yaml
-name: MCP Security Scan
-on: [push, pull_request]
-jobs:
-  mcp-safeguard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: pip install mcp-safeguard
-      - run: mcp-safeguard scan mcp.json --fail-on HIGH --format json --output mcp-findings.json
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/SyedAnas01/mcp-safeguard
+    rev: v0.9.4
+    hooks:
+      - id: mcp-safeguard
 ```
 
-**GitLab CI** (`.gitlab-ci.yml`):
+```bash
+pre-commit install
+pre-commit run mcp-safeguard --all-files
+```
+
+### Homebrew
+
+```bash
+brew tap SyedAnas01/mcp-safeguard && brew install mcp-safeguard
+```
+
+### Inline CLI / GitLab
 
 ```yaml
+# GitHub Actions without the Action
+- uses: actions/checkout@v4
+- run: pip install mcp-safeguard
+- run: mcp-safeguard scan mcp.json --fail-on HIGH --format json --output mcp-findings.json
+```
+
+```yaml
+# .gitlab-ci.yml
 mcp-safeguard:
   image: python:3.12
   script:
@@ -340,7 +365,7 @@ mcp-safeguard:
     - mcp-safeguard scan mcp.json --fail-on HIGH
 ```
 
-Point the scan at your own MCP config path (e.g. `claude_desktop_config.json`). Use `--fail-on CRITICAL` for a softer gate, or `--format json --output report.json` to archive results.
+Point `path` / `scan` at your own MCP config (e.g. `claude_desktop_config.json`). Use `--fail-on CRITICAL` for a softer gate.
 
 ---
 
@@ -553,7 +578,8 @@ Using mcp-safeguard in your pipeline, or found a real issue with it? We welcome 
 
 - [x] **v0.2** — Tool poisoning detection; CVSS scoring; JSON + Markdown output; batch scanning
 - [x] **v0.3** — SSRF detection module (SS-001–003); MCP server dog-fooding
-- [ ] **v0.4** — Scan over MCP stdio transport directly; VS Code extension; GitHub Actions plugin
+- [x] **v0.9** — GitHub Action (`@v0.9.6`) + SARIF upload; pre-commit hooks; Glama + OpenSSF Scorecard
+- [ ] **v0.4** — Scan over MCP stdio transport directly; VS Code extension
 - [ ] **v0.5** — AI-assisted remediation (Claude generates fixes); SBOM for tool supply chain
 - [ ] **v1.0** — SOC2/compliance report templates; MCP registry bulk scanning
 

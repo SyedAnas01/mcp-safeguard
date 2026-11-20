@@ -1,0 +1,16 @@
+# Dogfood: scan demo MCP configs on every commit that touches them.
+# Consumers copy the mcp-safeguard repo entry into their own config.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+
+  - repo: https://github.com/SyedAnas01/mcp-safeguard
+    rev: v0.9.4
+    hooks:
+      - id: mcp-safeguard
+        # Soft during dogfood of our own demo-vulnerable config
+        args: ['--fail-on', 'CRITICAL']

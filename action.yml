@@ -1,7 +1,6 @@
 name: 'MCP Safeguard'
 description: >-
-  Scan MCP configs and server source for prompt injection, credential leaks,
-  SSRF, tool poisoning, and source-level credential-handling flaws.
+  Scan MCP configs and source for prompt injection, credential leaks, SSRF, and tool poisoning.
 author: 'Syed Anas Mohiuddin / Cognivators'
 branding:
   icon: shield
