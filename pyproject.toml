@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-safeguard"
-version = "0.9.4"
+version = "0.9.7"
 description = "Security scanner for MCP servers — detect prompt injection, credential leaks, exposed endpoints, tool poisoning, and source-level credential-handling flaws"
 readme = "README.md"
 license = { text = "MIT" }
@@ -60,7 +60,20 @@ dev = [
     "ruff>=0.1",
     "build>=1.0",
     "twine>=4.0",
+    "pyyaml>=6.0",
 ]
+# Static-taint (tier S) — shells out to semgrep; keep separate from `dev`
+# (semgrep pins its own `mcp` and can break fastmcp if co-installed).
+static-taint = [
+    "semgrep>=1.45",
+    "tree-sitter>=0.25",
+    "tree-sitter-javascript>=0.23",
+    "tree-sitter-typescript>=0.23",
+    "tree-sitter-go>=0.23",
+    "tree-sitter-kotlin>=1.1",
+]
+# Stage-4 grounded verification (AnthropicVerifier). Manual walkthrough needs no deps.
+verify = ["anthropic>=0.40"]
 
 [project.urls]
 Homepage = "https://cognivators.com"

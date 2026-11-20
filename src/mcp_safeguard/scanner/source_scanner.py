@@ -211,6 +211,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import lexical
 from .prompt_injection import Severity
 
 # Rule catalog for introspection (security://rules resource, docs generation).
@@ -271,6 +272,23 @@ class SourceFinding:
     evidence: str
     remediation: str
     cvss_score: float = 0.0
+    # "L" (default) = existing lexical/regex rules below, unchanged.
+    # "S" = static-taint-path finding from taint_scanner.py (Stage 1-3
+    # entrypoint recovery + semgrep taint + AST path reconstruction), with
+    # `taint_path` attached. Purely additive -- see taint_scanner.py.
+    tier: str = "L"
+    taint_path: list[dict] | None = None
+    # "high" (default) = same confidence as every rule above/the original
+    # three tier-S classes (CMDI/PATHTRAV/SSRF): the sink itself is
+    # inherently dangerous, so a semgrep hit with no recognized sanitizer is
+    # a strong signal. "low" = an absence-based tier-S finding (currently
+    # only TAINT-IDOR): the sink is an ordinary data-access call, not an
+    # inherently dangerous one, and the finding fired because no recognized
+    # authorization-check call was found on the reconstructed path -- a real
+    # check this pass doesn't recognize would be a false negative, so a
+    # non-hit is not proof of safety and a hit is a weaker signal than the
+    # hard-sink classes. See taint_scanner.py's own module docstring.
+    confidence: str = "high"
 
 
 _GO_AUTH_SET = re.compile(
@@ -1068,9 +1086,43 @@ _ANCHOR_TOKENS = re.compile(r"\\A|\\z|\\Z|\^|\$|\\b|fullmatch")
 # _SQL_QUERY_EXEC_CALL/_SQL_FSTRING_OR_CONCAT_ARG are a
 # broader-recall companion for the more common single-line
 # cursor.execute(f"...") shape, the same SRC-009/SRC-019 relationship.
+#
+# Precision fix: measured directly against a 36-repo real-world corpus
+# (Round 40), the pattern above -- fired with NO requirement that the
+# interpolated text look anything like a query -- alone produced 1,087 of
+# 1,580 total raw HIGH/CRITICAL hits (69%), confirmed by direct sampling to
+# be almost entirely f-string/string-concat false positives on log
+# messages, UI text, HTTP header construction, and other non-query code
+# (e.g. `parts.append(f'error="{validated_desc}"')` building a WWW-
+# Authenticate header, or `lines.append(f'<tr class="{row_class}">')`
+# building an HTML row) -- any string built as `"a" + x + "b"` or an
+# f-string comparison anywhere in a file matches this shape, and that shape
+# is extremely common in code that has nothing to do with a query. Rather
+# than require a directly-wrapping execute()/.query() call (already tried
+# and already failed above), _SQL_KEYWORDS_NEARBY requires the match's own
+# *text* to actually look like it's building a query/query-clause -- a real
+# SQL or SoQL keyword within the same +-/-200-char window as the match.
+# Re-measured against the same corpus with this gate added: 822 -> 5 hits
+# for this sub-pattern (the 5 survivors: a JQL query builder, a raw SQL
+# schema-introspection filter, and a SQLite lookup by content hash -- all
+# genuine query-fragment construction). Single-word keywords are matched
+# case-SENSITIVE, uppercase-only (SELECT/INSERT/UPDATE/DELETE/WHERE/JOIN/
+# FROM/VALUES/SET) specifically so this can't be triggered by everyday
+# lowercase English/code usage that shares the same word -- `from` is a
+# Python/JS import keyword, `set`/`values`/`update` are common English
+# verbs/nouns, and the two real motivating bugs both embed their SQL in the
+# conventional uppercase style. The two-word phrases (GROUP BY/ORDER BY/
+# INSERT INTO/DELETE FROM) are distinctive enough in either case that
+# case-insensitive matching for those specifically doesn't reintroduce that
+# risk.
 _SQL_UNSAFE_QUERY_INTERP = re.compile(
     r"""[=<>!]=?\s*['"]\{[^{}\n]+\}['"]"""
     r"""|['"][^"'\n]{0,80}['"]\s*\+\s*\w+(?:\.\w+)*\s*\+\s*['"]"""
+)
+_SQL_KEYWORDS_NEARBY = re.compile(
+    r"\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE|JOIN|FROM|VALUES|SET)\b|"
+    r"(?i:\b(?:GROUP\s+BY|ORDER\s+BY|INSERT\s+INTO|DELETE\s+FROM)\b)|"
+    r"\$where\b"
 )
 _SQL_QUERY_EXEC_CALL = re.compile(
     r"\b(?:cursor\.execute|conn\.execute|\.execute|\.query|\.sql)\s*\("
@@ -1228,10 +1280,31 @@ _SRC_EXTS = {
 # relative root path, a top-level "tests/" dir has no leading slash to match
 # against at all -- both silently skip real source. Component matching is
 # exact and immune to both.
-_SKIP_DIRS = {"node_modules", "dist", "vendor", ".git", "__pycache__", "test", "tests"}
+#
+# Precision fix: widened with the directory names lexical.classify_file()
+# also recognizes (spec/__tests__, vendored/third-party dependency trees,
+# example/demo directories) so those subtrees are skipped BEFORE their
+# bytes are even read, not merely classified-and-discarded afterward --
+# real vendored bundles (node_modules-adjacent) can be large enough that
+# skipping the read matters. classify_file() is still run per-file below
+# for the shapes a directory name alone can't catch (a lone `foo.test.ts`
+# sitting next to production code, a minified bundle, a generated-file
+# marker).
+_SKIP_DIRS = {
+    "node_modules", "dist", "vendor", ".git", "__pycache__", "test", "tests",
+    "third_party", "thirdparty", ".yarn", "spec", "specs", "__tests__",
+    "examples", "example", "demo", "demos", "sample", "samples", "spike", "spikes",
+}
 
 
 def _iter_source(root: Path):
+    """Yields (path, stripped_text, raw_text) for every production source
+    file under root. `stripped_text` has comments/docstrings blanked (see
+    lexical.py) and is what every rule below matches against; `raw_text` is
+    the original file content, kept only for the inline-suppression-comment
+    check at the end of scan_source_tree() -- a `# safeguard: ignore[...]`
+    comment must still be readable there even though it's blanked out of
+    `stripped_text` like any other comment."""
     for p in root.rglob("*"):
         if p.suffix not in _SRC_EXTS or not p.is_file():
             continue
@@ -1239,14 +1312,57 @@ def _iter_source(root: Path):
             continue
         if p.stem.endswith("_test"):
             continue
+        if lexical.classify_file(p, root) is not lexical.FileRole.PRODUCTION:
+            continue
         try:
-            yield p, p.read_text(encoding="utf-8", errors="ignore")
+            raw = p.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
+        if lexical.classify_file_content(lexical.FileRole.PRODUCTION, raw) is not lexical.FileRole.PRODUCTION:
+            continue
+        yield p, lexical.strip_comments_and_docstrings(raw, p.suffix), raw
 
 
 def _line_of(text: str, idx: int) -> int:
     return text.count("\n", 0, idx) + 1
+
+
+def _matching_paren_end(text: str, open_paren_idx: int) -> int:
+    """Return the index just past the ')' that closes the '(' at
+    `open_paren_idx`, respecting string literals so a ')' inside a string
+    argument doesn't end the scan early. Used by SRC-022's companion check
+    to bound a query-execution call's OWN argument list -- a fixed-size
+    character window (the previous approach) can run past the call's
+    closing paren into the next, unrelated statement and misattribute an
+    f-string there as if it were this call's argument (confirmed as a real
+    false-positive source: a 200-char window past a single-line
+    `cursor.execute("...")` call reached into an unrelated `print(f"...")`
+    two lines later). Falls back to a bounded lookahead if no matching
+    paren is found before the cap, so a pathological/truncated file can't
+    make this scan unbounded."""
+    depth = 0
+    i = open_paren_idx
+    n = len(text)
+    limit = min(n, open_paren_idx + 2000)
+    while i < limit:
+        c = text[i]
+        if c in "\"'":
+            delim = c
+            i += 1
+            while i < limit and text[i] != delim:
+                if text[i] == "\\":
+                    i += 1
+                i += 1
+            i += 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return limit
 
 
 # Inline suppression: `# safeguard: ignore[SRC-013]` (or `// ...` for
@@ -1279,10 +1395,10 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
     # Materialize once: SRC-009/SRC-010 need a repo-wide signal (does this repo
     # demonstrate the safer pattern *anywhere*?) before flagging a per-file match.
     files = list(_iter_source(root))
-    repo_has_safe_shell_helper = any(_SAFE_SHELL_HELPER.search(text) for _, text in files)
-    repo_hardens_perms_somewhere = any(_PERM_HARDEN.search(text) for _, text in files)
+    repo_has_safe_shell_helper = any(_SAFE_SHELL_HELPER.search(text) for _, text, _ in files)
+    repo_hardens_perms_somewhere = any(_PERM_HARDEN.search(text) for _, text, _ in files)
 
-    for path, text in files:
+    for path, text, raw_text in files:
         rel = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
         # Collected separately from `findings` and filtered against inline
         # suppression comments just before merging into the real result --
@@ -1674,22 +1790,42 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
 
         # SRC-017: an HTTP header value is used as an authorization/tenant-
         # scoping identity, with no authentication check anywhere in the file.
+        #
+        # Precision fix: downgraded from CRITICAL to HIGH. The positive
+        # signal (a header value assigned straight into an identity-shaped
+        # variable) is a real, specific pattern; what made this CRITICAL
+        # was the file-wide ABSENCE of authentication vocabulary, which is
+        # a weak signal on its own -- it's blind to auth enforced in an
+        # imported module, a framework-level middleware registered
+        # elsewhere, or a decorator whose name this rule's vocabulary
+        # doesn't happen to recognize. This is still a legitimate, worth-
+        # a-closer-look lead (it's the exact shape of a real, independently
+        # confirmed finding -- see the test fixture this rule is verified
+        # against), not a confirmed vulnerability -- hence HIGH, and the
+        # message below now says so explicitly, rather than reading as
+        # already-confirmed at CRITICAL.
         hm = _HEADER_AS_IDENTITY.search(text)
         if hm and not _AUTH_CHECK_PRESENT.search(text):
             file_findings.append(SourceFinding(
-                "SRC-017", Severity.CRITICAL,
-                "Header value used as authorization identity with no authentication check",
+                "SRC-017", Severity.HIGH,
+                "Header value used as authorization identity with no authentication check in this file (unconfirmed -- read the file)",
                 "A value read directly from an HTTP header is used as an "
                 "authorization or tenant-scoping identity (its name "
-                "suggests user/tenant/org/account/RLS scoping), and this "
-                "file contains no authentication-check call anywhere -- "
-                "nothing verifies the caller actually owns the identity the "
-                "header claims. Any caller can set this header to any "
-                "value (including a documented 'admin'/'all access' "
-                "default) and receive that identity's data. This is the "
-                "exact pattern this project's campaign found giving full, "
-                "unauthenticated database access in a production sample "
-                "MCP server.",
+                "suggests user/tenant/org/account/RLS scoping), and no "
+                "authentication-check call was found anywhere in THIS "
+                "file. This is a lead, not a confirmed finding: the check "
+                "only looks at this one file's text, so it cannot see "
+                "authentication enforced in an imported module, a "
+                "framework middleware registered elsewhere, or a "
+                "decorator this rule doesn't recognize by name. Read the "
+                "cited file (and trace where this identity value actually "
+                "comes from) before treating this as a real bug. If "
+                "confirmed, the impact is severe: any caller can set this "
+                "header to any value (including a documented 'admin'/"
+                "'all access' default) and receive that identity's data -- "
+                "the exact pattern this project's own campaign found "
+                "giving full, unauthenticated database access in a "
+                "production sample MCP server.",
                 f"{rel}:{_line_of(text, hm.start())}",
                 text[hm.start():hm.start() + 90].strip(),
                 "Never let a caller-supplied header set its own "
@@ -1697,7 +1833,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                 "(verified token/session), then derive the "
                 "tenant/user/org scope server-side from that authenticated "
                 "identity -- never trust a header for it.",
-                9.8,
+                8.1,
             ))
 
         # SRC-018: path joined with a request/argument-derived value, fed
@@ -1807,6 +1943,22 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # defines no handler of its own gives no real evidence either way --
         # see _DEFINES_OWN_HANDLER's comment above.
         file_is_judgeable = _DEFINES_OWN_HANDLER.search(text) or not _DELEGATES_ALL_REGISTRATION.search(text)
+        # Precision fix: downgraded from CRITICAL to HIGH. Measured directly
+        # against a 36-repo real-world corpus (Round 40), SRC-021 alone
+        # produced 82 of the 95 total CRITICAL-severity raw hits (86%) --
+        # and a manual review of all 95 found the false-positive rate at
+        # CRITICAL severity to be ~98%, largely because "no auth vocabulary
+        # ANYWHERE in this one file" is blind to auth enforced in an
+        # imported module, a loopback/Unix-domain-socket listener
+        # misread as network-exposed, or a bare code comment matched as if
+        # it were a call. The positive signal (a real network-serve call
+        # with no in-file auth vocabulary) is still worth surfacing --
+        # both of this project's Round 40 findings were reached by
+        # investigating exactly this rule's pointer, even though the
+        # literal flagged line was wrong both times -- so the rule stays,
+        # at HIGH, with its message now saying explicitly that this is an
+        # unconfirmed, file-local lead rather than a confirmed critical
+        # vulnerability.
         if (
             nsm
             and "stdio" not in nsm_context.lower()
@@ -1814,18 +1966,27 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             and not _INBOUND_AUTH_CHECK.search(text)
         ):
             file_findings.append(SourceFinding(
-                "SRC-021", Severity.CRITICAL,
-                "Network listener starts with no authentication mechanism anywhere in the file",
+                "SRC-021", Severity.HIGH,
+                "Network listener starts with no authentication mechanism found in this file (unconfirmed -- read the file)",
                 "This file starts a network listener (HTTP/SSE server), and "
                 "no inbound authentication check (reading an Authorization/"
                 "API-key header from the incoming request, or a real auth "
-                "middleware/decorator) appears anywhere in it. Any network "
-                "caller who can reach this listener can invoke every tool "
-                "it exposes with no credential of any kind. This was the "
-                "single most common real bug shape this project's own "
-                "disclosure campaign found -- more common than any other "
-                "single class -- across government and commercial MCP "
-                "servers alike.",
+                "middleware/decorator) was found anywhere in THIS file. "
+                "This is a lead, not a confirmed finding: a file-local "
+                "vocabulary check cannot see authentication enforced in an "
+                "imported module or a framework-level middleware "
+                "registered elsewhere, and it can also be wrong about "
+                "whether the listener is really network-exposed (a "
+                "loopback bind, a Unix-domain socket, or a dev-only code "
+                "path can all match the same serve-call vocabulary). Read "
+                "the cited file -- and, if it imports its route/tool "
+                "registration from elsewhere, that module too -- before "
+                "treating this as a real bug. If confirmed, the impact is "
+                "severe: any network caller who can reach this listener "
+                "can invoke every tool it exposes with no credential of "
+                "any kind, the single most common real bug shape this "
+                "project's own disclosure campaign found across "
+                "government and commercial MCP servers alike.",
                 f"{rel}:{_line_of(text, nsm.start())}",
                 text[nsm.start():nsm.start() + 90].strip(),
                 "Require a credential (API key, bearer token, OAuth) on "
@@ -1834,7 +1995,7 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                 "public, unauthenticated read-only service, say so "
                 "explicitly in the file and confirm no tool it exposes can "
                 "read/write anything sensitive.",
-                9.1,
+                8.1,
             ))
 
         # SRC-027: an OAuth scope parameter taken straight from the request,
@@ -2349,6 +2510,8 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             window = text[max(0, qm.start() - 100):qm.end() + 100]
             if _SQL_PARAMETERIZED.search(window):
                 continue
+            if not _SQL_KEYWORDS_NEARBY.search(window):
+                continue
             s22_hit = True
             file_findings.append(SourceFinding(
                 "SRC-022", Severity.HIGH,
@@ -2356,9 +2519,11 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                 "A query fragment is built by hand-quoting an interpolated "
                 "value directly into the query text (an f-string or "
                 "concatenation produces a comparison operator directly "
-                "followed by a quoted, brace-interpolated value) rather "
-                "than binding it as a parameter, with no parameterization "
-                "marker (%s/?/$1/:name/params=) nearby. This is the exact "
+                "followed by a quoted, brace-interpolated value, and a "
+                "real SQL/SoQL keyword appears in the same neighborhood) "
+                "rather than binding it as a parameter, with no "
+                "parameterization marker (%s/?/$1/:name/params=) nearby. "
+                "This is the exact "
                 "root cause behind two independently-confirmed real "
                 "findings: apple-health-mcp-server's DuckDB-backed tools "
                 "(interpolate record_type/source_name/date_from/date_to/"
@@ -2388,11 +2553,20 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # where the query-execution call directly wraps an f-string/
         # concatenation argument. Only checked when no interpolation-shape
         # finding already fired above, mirroring SRC-018's inline-then-
-        # fallback structure.
+        # fallback structure. Bounded to the call's OWN argument list (via
+        # _matching_paren_end), not a fixed 200-char window -- the fixed
+        # window was confirmed, by direct debugging against a real Round 40
+        # target, to run past a short single-line call's closing paren and
+        # match an f-string in the NEXT, unrelated statement (a
+        # `cursor.execute("...")` immediately followed by an unrelated
+        # `print(f"...")` two lines later), which is a real query-execution
+        # call being false-credited with a fully hardcoded query string's
+        # supposed unsafe interpolation.
         if not s22_hit:
             cqm = _SQL_QUERY_EXEC_CALL.search(text)
             if cqm:
-                call_window = text[cqm.start():cqm.start() + 200]
+                call_end = _matching_paren_end(text, cqm.end() - 1)
+                call_window = text[cqm.start():call_end]
                 fm = _SQL_FSTRING_OR_CONCAT_ARG.search(call_window)
                 if fm and not _SQL_PARAMETERIZED.search(call_window):
                     file_findings.append(SourceFinding(
@@ -2554,30 +2728,45 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # authentication-dependency vocabulary anywhere in the file. Does
         # NOT require an in-file serve call (see the pattern comment above
         # for why, and the microsoft/AKS-Lab-GitHubCopilot provenance).
+        #
+        # Precision fix: downgraded from CRITICAL to HIGH, same reasoning
+        # as SRC-021 (13 of the 95 real-world-measured CRITICAL hits in the
+        # Round 40 corpus were this rule) -- the state-changing-route match
+        # is a real, specific positive signal, but "no auth vocabulary
+        # anywhere in THIS file" cannot see auth applied at the app/router
+        # level (a global `Depends()` added when the router is mounted,
+        # ASGI middleware wired in a different module) rather than on the
+        # route decorator itself.
         rdm = _STATE_CHANGING_ROUTE_DECORATOR.search(text)
         if rdm and not _ROUTE_AUTH_DEPENDENCY.search(text):
             file_findings.append(SourceFinding(
-                "SRC-034", Severity.CRITICAL,
-                "State-changing FastAPI/Flask route with no authentication dependency anywhere in the file",
+                "SRC-034", Severity.HIGH,
+                "State-changing FastAPI/Flask route with no authentication dependency found in this file (unconfirmed -- read the file)",
                 "This file defines a route for a state-changing HTTP verb "
                 "(POST/PUT/PATCH/DELETE) and no authentication-dependency "
                 "vocabulary (Depends(...), an auth middleware, a token/"
                 "API-key check, an HTTPBearer/APIKeyHeader/OAuth2 security "
-                "scheme) appears anywhere in it. Unlike SRC-021, this "
-                "doesn't require an in-file network-serve call -- an "
-                "importable ASGI/WSGI `app` object is very commonly served "
-                "externally (a Dockerfile CMD, `uvicorn module:app` from a "
-                "Helm chart) with no `.run()`/`.listen()` call in the "
-                "Python source at all, which is exactly the shape SRC-021 "
-                "cannot see. Any caller who can reach this route can "
-                "invoke it with no credential of any kind.",
+                "scheme) was found anywhere in THIS file. This is a lead, "
+                "not a confirmed finding: a file-local vocabulary check "
+                "cannot see authentication applied where this route's "
+                "router is mounted, or in ASGI middleware registered in a "
+                "different module. Unlike SRC-021, this doesn't require an "
+                "in-file network-serve call -- an importable ASGI/WSGI "
+                "`app` object is very commonly served externally (a "
+                "Dockerfile CMD, `uvicorn module:app` from a Helm chart) "
+                "with no `.run()`/`.listen()` call in the Python source at "
+                "all, which is exactly the shape SRC-021 cannot see. Read "
+                "the cited file -- and how/where its router is mounted -- "
+                "before treating this as a real bug. If confirmed, any "
+                "caller who can reach this route can invoke it with no "
+                "credential of any kind.",
                 f"{rel}:{_line_of(text, rdm.start())}",
                 text[rdm.start():rdm.start() + 90].strip(),
                 "Add an authentication dependency (FastAPI Depends(...) "
                 "wired to a real token/API-key check, or Flask "
                 "before_request middleware) to this route, or to the app "
                 "globally, before it accepts state-changing requests.",
-                9.1,
+                8.1,
             ))
 
         # SRC-035: a secret-shaped constant falls back to a hardcoded,
@@ -2639,8 +2828,12 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # Apply inline suppression once per file: a finding whose flagged
         # line carries `# safeguard: ignore[RULE-ID]` (or `// ...` for
         # brace-language files) is dropped before merging into the real
-        # result. `ignore[*]` silences every rule on that line.
-        source_lines = text.splitlines()
+        # result. `ignore[*]` silences every rule on that line. Checked
+        # against `raw_text`, not the comment-stripped `text` every rule
+        # above matched against -- the suppression comment IS a comment, so
+        # it would otherwise be blanked out right along with every other
+        # one before this check ever saw it.
+        source_lines = raw_text.splitlines()
         for ff in file_findings:
             line_str = ff.location.rsplit(":", 1)[-1]
             line_no = int(line_str) if line_str.isdigit() else 0

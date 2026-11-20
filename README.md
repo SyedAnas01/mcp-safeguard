@@ -9,10 +9,14 @@ Detect prompt injection · credential leaks · exposed endpoints · tool poisoni
 
 Maintained by [Syed Anas Mohiuddin](https://cognivators.com/founder) at [Cognivators](https://cognivators.com). Public vulnerability record: [cognivators.com/research](https://cognivators.com/research)
 
-> 🔎 **Found [CVE-2026-14540](https://github.com/googleapis/mcp-toolbox/pull/3448) — a server-side request forgery in Google's official MCP Toolbox. Google shipped the fix and credited the report.**
+> 🔎 **Credited finder/analyst on 4 CVEs:** [CVE-2026-14540](https://www.cve.org/CVERecord?id=CVE-2026-14540) (Google MCP Toolbox SSRF, High) · [CVE-2026-125271](https://www.cve.org/CVERecord?id=CVE-2026-125271) (AWS API MCP denyList bypass, High) · [CVE-2026-116635](https://www.cve.org/CVERecord?id=CVE-2026-116635) (AWS Serverless MCP path traversal) · [CVE-2026-97228](https://www.cve.org/CVERecord?id=CVE-2026-97228) (Rapid7 Bulk Export MCP). Full record: [cognivators.com/advisories](https://cognivators.com/advisories).
 
 [![PyPI version](https://badge.fury.io/py/mcp-safeguard.svg)](https://pypi.org/project/mcp-safeguard/)
-[![Found CVE-2026-14540 in Google's MCP Toolbox](https://img.shields.io/badge/found-CVE--2026--14540-critical)](https://github.com/googleapis/mcp-toolbox/pull/3448)
+[![4 CVEs](https://img.shields.io/badge/CVEs-4-critical)](https://cognivators.com/advisories)
+[![CVE-2026-14540](https://img.shields.io/badge/CVE--2026--14540-Google-critical)](https://www.cve.org/CVERecord?id=CVE-2026-14540)
+[![CVE-2026-125271](https://img.shields.io/badge/CVE--2026--125271-AWS-critical)](https://www.cve.org/CVERecord?id=CVE-2026-125271)
+[![CVE-2026-116635](https://img.shields.io/badge/CVE--2026--116635-AWS-orange)](https://www.cve.org/CVERecord?id=CVE-2026-116635)
+[![CVE-2026-97228](https://img.shields.io/badge/CVE--2026--97228-Rapid7-yellow)](https://www.cve.org/CVERecord?id=CVE-2026-97228)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20502474.svg)](https://doi.org/10.5281/zenodo.20502474)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -566,9 +570,25 @@ Share your results — open a [Discussion](https://github.com/SyedAnas01/mcp-saf
 - **[IETF Internet-Draft](https://datatracker.ietf.org/doc/draft-mohiuddin-mcp-security-considerations/)** — draft-mohiuddin-mcp-security-considerations-00, security considerations for the Model Context Protocol
 - **OWASP MCP Top 10** — Open PR adding an SSRF prevention/detection recommended control ([PR #42](https://github.com/OWASP/www-project-mcp-top-10/pull/42), under review)
 
-### 🔒 Real-World Fixes Credited
-- **googleapis/mcp-toolbox** — SSRF via redirect chain (CWE-918, fix in [PR #3448](https://github.com/googleapis/mcp-toolbox/pull/3448), reported by Syed Anas Mohiuddin) — credited with [CVE-2026-14540](https://www.cve.org/CVERecord?id=CVE-2026-14540)
-- **github/github-mcp-server** — GitHub token was attached to requests regardless of destination host; fix in [PR #3056](https://github.com/github/github-mcp-server/pull/3056), merged 2026-08-18, authored by Syed Anas Mohiuddin
+### 🔒 Real-World Fixes Credited (4 CVEs + authored merges)
+- **googleapis/mcp-toolbox** — SSRF via redirect chain (CWE-918) — [CVE-2026-14540](https://www.cve.org/CVERecord?id=CVE-2026-14540) · [PR #3448](https://github.com/googleapis/mcp-toolbox/pull/3448)
+- **aws/aws-api-mcp-server** — denyList/elicitList bypass — [CVE-2026-125271](https://www.cve.org/CVERecord?id=CVE-2026-125271) · [AWS bulletin 2026-176](https://aws.amazon.com/security/security-bulletins/2026-176-aws/)
+- **aws/aws-serverless-mcp-server** — path traversal — [CVE-2026-116635](https://www.cve.org/CVERecord?id=CVE-2026-116635) · [AWS bulletin 2026-164](https://aws.amazon.com/security/security-bulletins/2026-164-aws/)
+- **rapid7/bulk-export-mcp** — GraphQL query injection — [CVE-2026-97228](https://www.cve.org/CVERecord?id=CVE-2026-97228)
+- **github/github-mcp-server** — token attached regardless of destination host; authored fix [PR #3056](https://github.com/github/github-mcp-server/pull/3056)
+
+### Advanced source audit (research pipeline, now in this package)
+```bash
+# Lexical source rules (default)
+mcp-safeguard scan-source .
+
+# Tier-S static taint (entrypoint recovery → semgrep taint) — needs semgrep on PATH
+pip install 'mcp-safeguard[static-taint]'
+mcp-safeguard scan-source . --static-taint
+
+# End-to-end hunt pipeline (ClaimCards + optional LLM verify if ANTHROPIC_API_KEY set)
+mcp-safeguard hunt .
+```
 
 Using mcp-safeguard in your pipeline, or found a real issue with it? We welcome scan results and contributions — open a [Discussion](https://github.com/SyedAnas01/mcp-safeguard/discussions) or PR.
 
