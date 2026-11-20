@@ -18,6 +18,7 @@ Maintained by [Syed Anas Mohiuddin](https://cognivators.com/founder) at [Cogniva
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Listed on mcpservers.org](https://img.shields.io/badge/listed%20on-mcpservers.org-blueviolet)](https://mcpservers.org/servers/syedanas01/mcp-safeguard)
 [![GitLab](https://img.shields.io/badge/GitLab-repo-fc6d26?logo=gitlab)](https://gitlab.com/anasmohiuddinsyed/mcp-safeguard)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/SyedAnas01/mcp-safeguard/badge)](https://securityscorecards.dev/viewer/?uri=github.com/SyedAnas01/mcp-safeguard)
 
 ```bash
 pip install mcp-safeguard
