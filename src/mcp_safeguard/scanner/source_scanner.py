@@ -137,8 +137,22 @@ Rules:
            (`enable_dns_rebinding_protection`) is explicitly set to False,
            either as an attribute assignment or a constructor keyword
            argument (eren-solutions/mcp-security-audit).
+  SRC-037  A compiled `.pyc` in a `__pycache__` directory either has no
+           `.py` source sitting next to it, or disassembles to different
+           bytecode than compiling that `.py` fresh does -- the entry every
+           rule above this one is structurally blind to, since all of them
+           read only text source and `__pycache__` is excluded from that
+           walk by `_SKIP_DIRS`. Python's import system runs the `.pyc`,
+           not the `.py`, whenever the cache is considered valid, so a
+           divergent cache entry is exactly what executes on import while
+           looking clean to a human or a source-only scanner reading the
+           `.py` file. Added after finding mcp-safeguard itself had no
+           detection for this pattern (published independently as "PyCache
+           Trap", arXiv 2610.10612, Oct 2026): a planted divergent cache
+           entry ran different code on import while every rule in this
+           file, run against the same directory, reported zero findings.
 
-SRC-005..SRC-036 are heuristic in the same sense as SRC-001..004: each is a
+SRC-005..SRC-037 are heuristic in the same sense as SRC-001..004: each is a
 regex/text-proximity signal over source, not a type-aware or dataflow analysis.
 They are LEADS to confirm by reading the cited file, not proofs. Several
 (SRC-009, SRC-010) intentionally fire only when the SAME repository already
@@ -258,6 +272,7 @@ RULE_IDS: list[tuple[str, str]] = [
     ("SRC-034", "State-changing FastAPI/Flask route with no authentication dependency anywhere in the file"),
     ("SRC-035", "Secret-shaped constant falls back to a hardcoded non-empty string when its env var is unset"),
     ("SRC-036", "MCP SDK's DNS-rebinding protection explicitly disabled"),
+    ("SRC-037", "Compiled .pyc diverges from (or has no) .py source"),
 ]
 
 
@@ -1269,6 +1284,129 @@ def _is_suppressed(lines: list[str], line_no: int, rule_id: str) -> bool:
         return False
     ids = {i.strip().upper() for i in m.group(1).split(",")}
     return "*" in ids or rule_id.upper() in ids
+
+
+def _pyc_source_path(pyc_path: Path) -> Path:
+    """Best-effort reverse of `__pycache__/name.cpython-XY.pyc` -> the
+    `name.py` that would sit next to the `__pycache__` directory itself.
+    Doesn't handle every possible tag shape (e.g. `.opt-1.pyc`), only the
+    common `name.tag.pyc` form importlib actually produces."""
+    stem = pyc_path.stem  # e.g. "handler.cpython-312"
+    name = stem.rsplit(".", 1)[0] if "." in stem else stem
+    return pyc_path.parent.parent / f"{name}.py"
+
+
+def _code_objects_match(a, b) -> bool:
+    """Recursive: a top-level match isn't enough, since the divergent
+    payload in a real crafted cache entry sits inside a nested function's
+    own code object (co_consts), not the module-level code that's mostly
+    just def/import boilerplate for a single-function file -- a shallow
+    top-level-only compare would miss exactly the case this rule exists
+    to catch."""
+    if a.co_code != b.co_code:
+        return False
+    a_sub = [c for c in a.co_consts if hasattr(c, "co_code")]
+    b_sub = [c for c in b.co_consts if hasattr(c, "co_code")]
+    if len(a_sub) != len(b_sub):
+        return False
+    return all(
+        _code_objects_match(x, y) for x, y in zip(a_sub, b_sub, strict=True)
+    )
+
+
+def _scan_pycache_divergence(root: Path) -> list[SourceFinding]:
+    """SRC-037. Separate pass from the main per-file loop below: this
+    reads binary `.pyc` files and compares compiled bytecode, not text
+    source, so it doesn't fit `_iter_source`'s text-generator shape, and
+    `__pycache__` stays in `_SKIP_DIRS` for every other rule (removing it
+    there would risk a stray compiled artifact being misread as real
+    source by rules that assume `_iter_source` only yields `.py` text)."""
+    import importlib.util
+    import marshal
+
+    findings: list[SourceFinding] = []
+    for pyc_path in root.rglob("__pycache__/*.pyc"):
+        rel_pyc = (
+            str(pyc_path.relative_to(root))
+            if pyc_path.is_relative_to(root)
+            else str(pyc_path)
+        )
+        py_path = _pyc_source_path(pyc_path)
+
+        if not py_path.is_file():
+            findings.append(SourceFinding(
+                "SRC-037", Severity.HIGH,
+                "Compiled .pyc has no corresponding .py source",
+                "A __pycache__ entry exists with no .py file next to it "
+                "that it could have been compiled from. Python's import "
+                "system will still run this bytecode on import; there is "
+                "nothing for a human, or any source-only scanner, to read "
+                "to know what it actually does.",
+                rel_pyc,
+                pyc_path.name,
+                "Remove orphaned __pycache__ entries before shipping or "
+                "reviewing a server, or disassemble the bytecode directly "
+                "(the dis module) if the file is genuinely expected here.",
+                7.5,
+            ))
+            continue
+
+        try:
+            raw = pyc_path.read_bytes()
+            if raw[:4] != importlib.util.MAGIC_NUMBER:
+                # Compiled for a different Python version/build than the
+                # one running this scan -- marshal.loads below would
+                # likely raise, or worse, misparse silently. Flag the gap
+                # rather than guess at a result this process can't verify.
+                findings.append(SourceFinding(
+                    "SRC-037", Severity.MEDIUM,
+                    "Compiled .pyc targets a different Python build; not inspectable here",
+                    "This .pyc's magic number doesn't match the "
+                    "interpreter running this scan, so its bytecode can't "
+                    "be safely compared against the visible .py source "
+                    "from this process. Not proof of anything by itself, "
+                    "but also not something this check -- or most "
+                    "source-only review -- actually inspected.",
+                    rel_pyc,
+                    pyc_path.name,
+                    "Re-run this scan under the Python build the .pyc was "
+                    "compiled for, or remove the stale cache entry.",
+                    0.0,
+                ))
+                continue
+            cached_code = marshal.loads(raw[16:])
+            source = py_path.read_text(encoding="utf-8", errors="ignore")
+            fresh_code = compile(source, str(py_path), "exec")
+        except (OSError, EOFError, ValueError, SyntaxError, TypeError):
+            # A real parse/marshal failure here is itself not a clean
+            # pass -- but without a readable code object on at least one
+            # side there's nothing left to compare, so skip rather than
+            # assert a verdict this check can't support.
+            continue
+
+        if not _code_objects_match(fresh_code, cached_code):
+            findings.append(SourceFinding(
+                "SRC-037", Severity.CRITICAL,
+                "Compiled .pyc bytecode diverges from the .py source sitting next to it",
+                f"{rel_pyc} does not disassemble to the same bytecode -- "
+                f"at the module level or in a nested function/class code "
+                f"object -- as compiling {py_path.name} fresh. Python's "
+                "import system runs the .pyc, not the .py, whenever the "
+                "cache is considered valid, and a cache written with "
+                "invalidation_mode=UNCHECKED_HASH is never re-validated "
+                "against its source at all. What actually executes on "
+                "import is NOT what a human, or a text-based scanner, "
+                "reading the .py file would expect.",
+                rel_pyc,
+                f"cached bytecode for {py_path.name} does not match a fresh compile",
+                "Delete this __pycache__ entry and let Python regenerate "
+                "it from the real source. If it was shipped inside the "
+                "package rather than generated locally on install, treat "
+                "its presence as a supply-chain red flag on its own.",
+                9.1,
+            ))
+
+    return findings
 
 
 def scan_source_tree(root: str | Path) -> list[SourceFinding]:
@@ -2646,6 +2784,11 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             line_no = int(line_str) if line_str.isdigit() else 0
             if not _is_suppressed(source_lines, line_no, ff.rule_id):
                 findings.append(ff)
+
+    # SRC-037 is a separate, binary-aware pass over __pycache__ entries --
+    # see _scan_pycache_divergence's own docstring for why it can't live
+    # in the text-based per-file loop above.
+    findings.extend(_scan_pycache_divergence(root))
 
     return findings
 
