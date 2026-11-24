@@ -32,7 +32,7 @@ mcp-safeguard scan your-config.json
 **CI (drop-in GitHub Action):**
 
 ```yaml
-- uses: SyedAnas01/mcp-safeguard@v0.9.6
+- uses: SyedAnas01/mcp-safeguard@v0.10.1
   with:
     mode: scan-source   # or: scan
     path: .
@@ -40,7 +40,7 @@ mcp-safeguard scan your-config.json
     format: sarif
 ```
 
-**pre-commit:** `rev: v0.9.4` · **Homebrew:** `brew tap SyedAnas01/mcp-safeguard && brew install mcp-safeguard`
+**pre-commit:** `rev: v0.10.1` · **Homebrew:** `brew tap SyedAnas01/mcp-safeguard && brew install mcp-safeguard`
 
 </div>
 
@@ -315,7 +315,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: SyedAnas01/mcp-safeguard@v0.9.6
+      - uses: SyedAnas01/mcp-safeguard@v0.10.1
         with:
           mode: scan-source          # or: scan (config JSON)
           path: .                    # or: mcp.json / claude_desktop_config.json
@@ -335,7 +335,7 @@ Every commit that touches an MCP config pulls PyPI via the hook:
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/SyedAnas01/mcp-safeguard
-    rev: v0.9.4
+    rev: v0.10.1
     hooks:
       - id: mcp-safeguard
 ```

@@ -244,13 +244,13 @@ def _run_scan(config_path: str, min_severity: str = "INFO",
     filtered.sort(key=lambda x: (_severity_value(x["severity"]), -x["cvss"]))
 
     if fmt == "json":
-        print(json.dumps(filtered, indent=2))
+        _emit_machine_report(json.dumps(filtered, indent=2), output)
         return _exit_code(filtered, fail_on)
 
     if fmt == "sarif":
         from mcp_safeguard.scanner.report_generator import generate_sarif_report
 
-        print(generate_sarif_report(filtered))
+        _emit_machine_report(generate_sarif_report(filtered), output)
         return _exit_code(filtered, fail_on)
 
     if not filtered:
@@ -403,13 +403,13 @@ def _run_source_scan(root_path: str, min_severity: str = "INFO",
     filtered.sort(key=lambda x: (_severity_value(x["severity"]), -x["cvss"]))
 
     if fmt == "json":
-        print(json.dumps(filtered, indent=2))
+        _emit_machine_report(json.dumps(filtered, indent=2), output)
         return _exit_code(filtered, fail_on)
 
     if fmt == "sarif":
         from mcp_safeguard.scanner.report_generator import generate_sarif_report
 
-        print(generate_sarif_report(filtered))
+        _emit_machine_report(generate_sarif_report(filtered), output)
         return _exit_code(filtered, fail_on)
 
     if not filtered:
@@ -734,6 +734,21 @@ def _run_rescan(targets_file: str, ledger_path: str, state_path: str, fmt: str =
     print(f"  state: {state_path}")
     print(f"  ledger: {ledger_path}")
     return 0
+
+
+def _emit_machine_report(text: str, output: str | None) -> None:
+    """Print a json/sarif report to stdout, or write it to `output` if given.
+
+    With --format json/sarif, --output used to be ignored (the report only
+    went to stdout), so CI recipes like `--format sarif --output x.sarif`
+    never produced the file. The explicit --format wins over the file
+    extension; the "saved" notice goes to stderr so stdout stays clean.
+    """
+    if output:
+        Path(output).write_text(text)
+        print(f"Report saved: {output}", file=sys.stderr)
+    else:
+        print(text)
 
 
 def _write_output(findings: list[dict], output: str, scanned: str) -> None:
@@ -1359,16 +1374,20 @@ def main() -> None:
         sys.exit(0)
 
     if args[0] == "scan":
-        if len(args) < 2:
-            print("Error: missing config file. Usage: mcp-safeguard scan <config.json>", file=sys.stderr)
-            sys.exit(1)
-        config_path = args[1]
+        if any(a in ("-h", "--help") for a in args[1:]):
+            _print_help()
+            sys.exit(0)
+        # Options and config paths may come in any order: pre-commit runs
+        # `mcp-safeguard scan --fail-on HIGH a.json b.json` (hook args first,
+        # filenames appended), which used to scan a "file" named --fail-on
+        # and exit 0, so the hook could never fail.
+        config_paths: list[str] = []
         severity = "INFO"
         fail_on = None
         output = None
         fmt = "text"
 
-        i = 2
+        i = 1
         while i < len(args):
             if args[i] == "--severity" and i + 1 < len(args):
                 severity = args[i + 1].upper()
@@ -1382,18 +1401,29 @@ def main() -> None:
             elif args[i] == "--format" and i + 1 < len(args):
                 fmt = args[i + 1].lower()
                 i += 2
+            elif not args[i].startswith("--"):
+                config_paths.append(args[i])
+                i += 1
             else:
                 print(f"Warning: unknown option {args[i]}", file=sys.stderr)
                 i += 1
 
-        code = _run_scan(config_path, severity, fail_on, output, fmt)
+        if not config_paths:
+            print("Error: missing config file. Usage: mcp-safeguard scan <config.json>", file=sys.stderr)
+            sys.exit(1)
+        if output and len(config_paths) > 1:
+            print("Error: --output takes a single config file.", file=sys.stderr)
+            sys.exit(1)
+        code = 0
+        for config_path in config_paths:
+            code = max(code, _run_scan(config_path, severity, fail_on, output, fmt))
         sys.exit(code)
 
     elif args[0] == "scan-source":
-        if len(args) < 2:
-            print("Error: missing target directory. Usage: mcp-safeguard scan-source <path>", file=sys.stderr)
-            sys.exit(1)
-        root_path = args[1]
+        if any(a in ("-h", "--help") for a in args[1:]):
+            _print_help()
+            sys.exit(0)
+        root_path = None
         severity = "INFO"
         fail_on = None
         output = None
@@ -1403,7 +1433,7 @@ def main() -> None:
         verify = False
         include_low_confidence = False
 
-        i = 2
+        i = 1
         while i < len(args):
             if args[i] == "--severity" and i + 1 < len(args):
                 severity = args[i + 1].upper()
@@ -1429,9 +1459,16 @@ def main() -> None:
             elif args[i] == "--include-low-confidence":
                 include_low_confidence = True
                 i += 1
+            elif not args[i].startswith("--") and root_path is None:
+                root_path = args[i]
+                i += 1
             else:
                 print(f"Warning: unknown option {args[i]}", file=sys.stderr)
                 i += 1
+
+        if root_path is None:
+            print("Error: missing target directory. Usage: mcp-safeguard scan-source <path>", file=sys.stderr)
+            sys.exit(1)
 
         code = _run_source_scan(root_path, severity, fail_on, output, fmt, baseline, static_taint, verify,
                                  include_low_confidence)

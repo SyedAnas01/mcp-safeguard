@@ -44,7 +44,12 @@ def test_microsoft_retail_sample_src017_fires_at_the_real_vulnerable_line():
     assert src017, f"Expected SRC-017 to fire on the real vulnerable code, got: {findings}"
 
     finding = src017[0]
-    assert finding.severity.value == "CRITICAL"
+    # SRC-017 was downgraded CRITICAL -> HIGH as a precision fix: the
+    # positive match (header value used as an identity) is unchanged and
+    # still fires here, but "no auth vocabulary anywhere in this file" is a
+    # file-local, unconfirmed signal -- see source_scanner.py's SRC-017
+    # comment and bench/MILESTONE_PRECISION_STATUS.md for the full reasoning.
+    assert finding.severity.value == "HIGH"
     assert "sales_analysis.py:" in finding.location
     # The finding must anchor at the actual assignment line (get_rls_user_id's
     # `rls_user_id = get_header(ctx, "x-rls-user-id")`), not somewhere else

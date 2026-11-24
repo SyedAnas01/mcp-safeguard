@@ -142,7 +142,7 @@ _CREDENTIAL_PATTERNS: list[tuple[str, Severity, str, str, float]] = [
     ),
     # OpenAI keys
     (
-        r"sk-[A-Za-z0-9]{48}",
+        r"\bsk-(?:(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}|[A-Za-z0-9]{48})",
         Severity.CRITICAL,
         "CRED-016",
         "OpenAI API Key",
@@ -295,47 +295,59 @@ def scan_for_credentials(config: dict[str, Any]) -> list[CredentialFinding]:
                 )
             )
 
-    # Check env section specifically
-    env_vars = config.get("env", {})
+    # Check env sections specifically: the top-level `env`, plus each server's
+    # own `env` inside a Claude Desktop `mcpServers` map or a VS Code `servers`
+    # map. Before 0.10.1 only the top-level `env` got the by-name check, which
+    # missed the most common real-world config shape entirely.
+    env_sections: list[tuple[str, dict]] = []
+    if isinstance(config.get("env"), dict):
+        env_sections.append(("env.", config["env"]))
+    for map_key in ("mcpServers", "servers"):
+        servers = config.get(map_key)
+        if isinstance(servers, dict):
+            for srv_name, srv in servers.items():
+                if isinstance(srv, dict) and isinstance(srv.get("env"), dict):
+                    env_sections.append((f"{map_key}.{srv_name}.env.", srv["env"]))
 
-    for key, value in env_vars.items():
-        # Check by env var name (catches redacted/placeholder values too)
-        for name_pattern, rule_id, title, cvss_score in _SENSITIVE_ENV_NAMES:
-            if re.search(name_pattern, key, re.IGNORECASE):
-                # Only flag if value looks like a real secret (not a reference like ${VAR} or empty)
-                val_str = str(value) if value else ""
-                is_reference = bool(re.match(r"^\$\{?[A-Z_]+\}?$", val_str))
-                if val_str and not is_reference:
-                    findings.append(
-                        CredentialFinding(
-                            rule_id=f"{rule_id}-NAME",
-                            severity=Severity.HIGH,
-                            title=f"{title} (by name)",
-                            description=f"Env var '{key}' name indicates a hardcoded credential.",
-                            location=f"env.{key}",
-                            evidence=_mask_credential(val_str) if len(val_str) > 4 else "[set]",
-                            remediation="Use a secrets manager (AWS Secrets Manager, HashiCorp Vault) instead of inline env vars.",
-                            cvss_score=cvss_score,
+    for env_prefix, env_vars in env_sections:
+        for key, value in env_vars.items():
+            # Check by env var name (catches redacted/placeholder values too)
+            for name_pattern, rule_id, title, cvss_score in _SENSITIVE_ENV_NAMES:
+                if re.search(name_pattern, key, re.IGNORECASE):
+                    # Only flag if value looks like a real secret (not a reference like ${VAR} or empty)
+                    val_str = str(value) if value else ""
+                    is_reference = bool(re.match(r"^\$\{?[A-Z_]+\}?$", val_str))
+                    if val_str and not is_reference:
+                        findings.append(
+                            CredentialFinding(
+                                rule_id=f"{rule_id}-NAME",
+                                severity=Severity.HIGH,
+                                title=f"{title} (by name)",
+                                description=f"Env var '{key}' name indicates a hardcoded credential.",
+                                location=f"{env_prefix}{key}",
+                                evidence=_mask_credential(val_str) if len(val_str) > 4 else "[set]",
+                                remediation="Use a secrets manager (AWS Secrets Manager, HashiCorp Vault) instead of inline env vars.",
+                                cvss_score=cvss_score,
+                            )
                         )
-                    )
-                break  # one match per key is enough
+                    break  # one match per key is enough
 
-        # Check by value pattern
-        if isinstance(value, str) and len(value) > 5:
-            for pattern, severity, rule_id, title, cvss_score in _CREDENTIAL_PATTERNS:
-                if re.search(pattern, value, re.IGNORECASE):
-                    findings.append(
-                        CredentialFinding(
-                            rule_id=f"{rule_id}-ENV",
-                            severity=severity,
-                            title=f"{title} in Environment Variable",
-                            description=f"Env var '{key}' appears to contain a {title.lower()}.",
-                            location=f"env.{key}",
-                            evidence=_mask_credential(value),
-                            remediation="Use a secrets manager (AWS Secrets Manager, HashiCorp Vault) instead of inline env vars.",
-                            cvss_score=cvss_score,
+            # Check by value pattern
+            if isinstance(value, str) and len(value) > 5:
+                for pattern, severity, rule_id, title, cvss_score in _CREDENTIAL_PATTERNS:
+                    if re.search(pattern, value, re.IGNORECASE):
+                        findings.append(
+                            CredentialFinding(
+                                rule_id=f"{rule_id}-ENV",
+                                severity=severity,
+                                title=f"{title} in Environment Variable",
+                                description=f"Env var '{key}' appears to contain a {title.lower()}.",
+                                location=f"{env_prefix}{key}",
+                                evidence=_mask_credential(value),
+                                remediation="Use a secrets manager (AWS Secrets Manager, HashiCorp Vault) instead of inline env vars.",
+                                cvss_score=cvss_score,
+                            )
                         )
-                    )
 
     findings.sort(key=lambda f: f.cvss_score, reverse=True)
     # Deduplicate by masked evidence: the same underlying credential can trip

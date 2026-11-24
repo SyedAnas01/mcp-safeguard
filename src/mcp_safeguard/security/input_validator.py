@@ -99,6 +99,59 @@ def resolves_to_unsafe_ip(host: str) -> bool:
     return False
 
 
+def resolve_pinned_ip(host: str) -> str:
+    """
+    Resolve `host` ONCE and return a single validated-safe IP literal that the
+    caller must then connect to directly (never re-resolving `host` itself).
+
+    This exists to close a DNS-rebinding TOCTOU: resolves_to_unsafe_ip()
+    validates a hostname by resolving it, but a caller that then connects
+    using the ORIGINAL HOSTNAME STRING triggers a second, independent DNS
+    resolution -- an attacker's authoritative DNS server can answer the first
+    (validation) query with a public IP and every subsequent (connection)
+    query with a private/internal one. Pinning the connection to the exact IP
+    this function already validated removes that second resolution entirely.
+
+    Applies the same "reject if ANY resolved address is unsafe" rule as
+    resolves_to_unsafe_ip() (not just the one returned), so this is never
+    laxer than the existing check -- only immune to being re-queried.
+
+    Args:
+        host: Hostname or IP string to resolve and pin.
+
+    Returns:
+        The first safe resolved IP address, as a string.
+
+    Raises:
+        ValidationError: if `host` fails to resolve, or if any resolved
+            address is private/reserved/link-local or a cloud metadata IP.
+    """
+    try:
+        addrinfo = socket.getaddrinfo(host, None)
+    except OSError as e:
+        raise ValidationError(f"Could not resolve host: '{host}'.") from e
+
+    pinned_ip: str | None = None
+    for _family, _type, _proto, _canonname, sockaddr in addrinfo:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str.split("%")[0])  # strip IPv6 zone id
+        except ValueError:
+            continue
+        if _is_unsafe_ip(ip):
+            raise ValidationError(
+                f"SSRF blocked: '{host}' resolves to a private/reserved "
+                "or cloud-metadata address."
+            )
+        if pinned_ip is None:
+            pinned_ip = str(ip)
+
+    if pinned_ip is None:
+        raise ValidationError(f"Could not resolve host: '{host}'.")
+
+    return pinned_ip
+
+
 def validate_url(url: str, allowed_schemes: list[str] | None = None) -> str:
     """
     Validate and sanitize a URL for use as a scan target.

@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+        pip install -e ".[dev]" "tree-sitter>=0.25" "tree-sitter-javascript>=0.23" "tree-sitter-typescript>=0.23" "tree-sitter-go>=0.23" "tree-sitter-kotlin>=1.1" "anthropic>=0.40"
     - name: Run tests
       run: pytest tests/ -v --tb=short
 
@@ -37,6 +37,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Check release tag matches package version
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "${TAG#v}" != "$VERSION" ]; then
+            echo "::error::Release tag $TAG does not match pyproject version $VERSION"
+            exit 1
+          fi
       - name: Build distribution
         run: |
           pip install build

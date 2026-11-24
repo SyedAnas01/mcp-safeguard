@@ -54,10 +54,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .. import __version__ as _MCP_SAFEGUARD_VERSION
 from . import threat_model as _threat_model_mod

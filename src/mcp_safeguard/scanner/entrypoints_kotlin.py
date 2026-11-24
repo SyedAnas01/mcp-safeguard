@@ -116,9 +116,8 @@ from pathlib import Path
 
 from tree_sitter import Language, Node, Parser
 
-from .entrypoints import McpEntrypoint
-from .entrypoints import _is_skip_dir_part
 from .entrypoints import _SKIP_DIR_PARTS as _PY_SKIP_DIR_PARTS
+from .entrypoints import McpEntrypoint, _is_skip_dir_part
 
 # Kotlin/Gradle-specific additions on top of the shared skip list
 # (node_modules, dist, vendor, .git, test(s), venv/.venv, benchmarks/

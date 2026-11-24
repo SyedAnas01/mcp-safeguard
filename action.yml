@@ -68,10 +68,12 @@ runs:
 
     - name: Install mcp-safeguard
       shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        if [ -n "${{ inputs.version }}" ]; then
-          pip install --quiet "mcp-safeguard==${{ inputs.version }}"
+        if [ -n "$INPUT_VERSION" ]; then
+          pip install --quiet "mcp-safeguard==$INPUT_VERSION"
         else
           pip install --quiet mcp-safeguard
         fi
@@ -80,15 +82,18 @@ runs:
     - name: Run mcp-safeguard
       id: scan
       shell: bash
+      # Inputs go through env, never `${{ }}` inside the script, so a crafted
+      # input value cannot inject shell commands into the runner.
+      env:
+        MODE: ${{ inputs.mode }}
+        PATH_ARG: ${{ inputs.path }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        SEVERITY: ${{ inputs.severity }}
+        FORMAT: ${{ inputs.format }}
+        OUTPUT: ${{ inputs.output }}
+        CONTINUE: ${{ inputs.continue-on-error }}
       run: |
         set -uo pipefail
-        MODE="${{ inputs.mode }}"
-        PATH_ARG="${{ inputs.path }}"
-        FAIL_ON="${{ inputs.fail-on }}"
-        SEVERITY="${{ inputs.severity }}"
-        FORMAT="${{ inputs.format }}"
-        OUTPUT="${{ inputs.output }}"
-        CONTINUE="${{ inputs.continue-on-error }}"
 
         case "$MODE" in
           scan|scan-source) ;;
