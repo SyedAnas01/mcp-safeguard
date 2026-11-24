@@ -3,7 +3,7 @@
 #
 #   repos:
 #     - repo: https://github.com/SyedAnas01/mcp-safeguard
-#       rev: v0.9.4   # pin to a release tag that includes this file
+#       rev: v0.10.1   # pin to a release tag that includes this file
 #       hooks:
 #         - id: mcp-safeguard
 #
@@ -16,3 +16,13 @@
   language: python
   files: '(^|/)(mcp\.json|\.mcp\.json|claude_desktop_config\.json|.*[._-]mcp[._-]?config\.json)$'
   args: ['--fail-on', 'HIGH']
+
+# Scan an MCP server's own source tree (shell injection, SSRF, credential
+# leaks, TLS bypass, tool poisoning). Runs once per commit on the whole repo.
+- id: mcp-safeguard-source
+  name: mcp-safeguard (MCP server source scan)
+  description: Scan MCP server source code for shell injection, SSRF, credential leaks and tool poisoning
+  entry: mcp-safeguard scan-source . --fail-on HIGH
+  language: python
+  pass_filenames: false
+  always_run: true

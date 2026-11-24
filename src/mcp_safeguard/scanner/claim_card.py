@@ -27,6 +27,7 @@ from .sandbox import OracleTrace
 from .taint_scanner import Step
 from .verify import Verdict
 
+
 # The exact shape `retrieval.Exemplar.to_dict()` produces and
 # `ClaimCard.retrieved_exemplars` stores below -- a single source of truth so
 # the two modules' independent field lists cannot silently drift apart.

@@ -641,6 +641,80 @@ _PATH_CONTAINMENT_CHECK = re.compile(
 # helper on the interpolated value, so a properly-quoted call doesn't fire.
 _SHELL_ESCAPED_INLINE = re.compile(r"shlex\.quote\(|shellQuote\(|escapeShellArg\(")
 
+# SRC-019 call-site discovery (0.10.1). The SRC-009 regex above missed
+# subprocess.check_output/check_call/Popen, os.popen, subprocess.getoutput
+# and child_process.execSync, and `[^)]*shell=True` broke on any nested paren
+# inside the argument list. SRC-019 now finds the call NAME, bounds the
+# call's own argument list with _matching_paren_end, and (for the subprocess
+# family) requires shell=True inside that argument list.
+_SHELL_CALL_NAME_BROAD = re.compile(
+    r"(?:child_process\.exec(?:Sync)?|(?<![.\w])exec(?:Sync)?|"
+    r"subprocess\.(?:run|call|check_call|check_output|Popen|getoutput|getstatusoutput)|"
+    r"os\.(?:system|popen))\s*\("
+)
+_SUBPROCESS_NEEDS_SHELL = re.compile(r"^subprocess\.(?:run|call|check_call|check_output|Popen)\b")
+_SHELL_TRUE_ARG = re.compile(r"\bshell\s*=\s*True\b")
+# A command string BUILT from pieces: template/f-string interpolation,
+# string concatenation, str.format, or %-formatting.
+_SHELL_BUILD_MARK = re.compile(
+    r"\$\{[^}]+\}|f[\"'][^\"']*\{[^}]+\}"
+    r"|[\"']\s*\+\s*[A-Za-z_$]|[A-Za-z_$\])]\s*\+\s*[\"'`]"
+    r"|[\"']\s*\.format\(|[\"']\s*%\s*[\w(]"
+)
+_FIRST_ARG_IDENT = re.compile(r"\(\s*([A-Za-z_$][\w$]*)\s*[,)]")
+_ENCLOSING_PARAMS = re.compile(
+    r"(?:\bdef\s+\w+\s*\(([^)]*)\)|\bfunction\b[^(]*\(([^)]*)\)|\(([^()]*)\)\s*=>)"
+)
+
+
+def _first_arg_is_enclosing_param(text: str, call_start: int, args: str) -> bool:
+    """True when the shell call's first argument is a bare identifier that is
+    also a parameter of the nearest enclosing function/def/arrow (within 1500
+    chars before the call) -- e.g. a tool handler `def run(cmd)` that does
+    `subprocess.run(cmd, shell=True)`: the caller supplies the whole command."""
+    m = _FIRST_ARG_IDENT.match(args)
+    if not m:
+        return False
+    ident = m.group(1)
+    before = text[max(0, call_start - 1500):call_start]
+    sigs = list(_ENCLOSING_PARAMS.finditer(before))
+    if not sigs:
+        return False
+    params = next(g for g in sigs[-1].groups() if g is not None)
+    return re.search(r"(?<![\w$])" + re.escape(ident) + r"(?![\w$])", params) is not None
+
+
+_CHILD_PROCESS_IMPORT = re.compile(
+    r"require\(\s*[\"'](?:node:)?child_process[\"']\s*\)|from\s+[\"'](?:node:)?child_process[\"']"
+)
+_LOCAL_EXEC_DEF = re.compile(
+    r"\bfunction\s+exec(?:Sync)?\s*\(|\b(?:var|let|const)\s+exec(?:Sync)?\s*=\s*(?:function\b|\()"
+)
+
+
+def _broad_shell_injection_site(text: str):
+    """First shell-executing call site whose command is built from pieces or
+    is a caller-supplied parameter, with no inline escaping helper. Returns
+    (start_index, call_text) or None."""
+    # A bare exec()/execSync() is only a shell call when it comes from
+    # child_process; Python's builtin exec and bundled helpers named exec
+    # (e.g. wrap-ansi) are not.
+    bare_exec_ok = bool(_CHILD_PROCESS_IMPORT.search(text)) and not _LOCAL_EXEC_DEF.search(text)
+    for m in _SHELL_CALL_NAME_BROAD.finditer(text):
+        if m.group(0).startswith("exec") and not bare_exec_ok:
+            continue
+        open_idx = m.end() - 1
+        end = _matching_paren_end(text, open_idx)
+        call = text[m.start():min(end, m.start() + 600)]
+        args = call[open_idx - m.start():]
+        if _SUBPROCESS_NEEDS_SHELL.match(call) and not _SHELL_TRUE_ARG.search(args):
+            continue
+        if _SHELL_ESCAPED_INLINE.search(call):
+            continue
+        if _SHELL_BUILD_MARK.search(args) or _first_arg_is_enclosing_param(text, m.start(), args):
+            return m.start(), call
+    return None
+
 # SRC-020: unencoded user input concatenated/interpolated directly into a URL
 # query string, instead of going through a proper encoder. This is the
 # statically-detectable root cause behind HTTP Parameter Pollution and query-
@@ -1876,30 +1950,29 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
 
         # SRC-019: unescaped shell interpolation -- broader companion to
         # SRC-009, no repo-wide corroboration required (see module docstring).
-        sm2 = _SHELL_STRING_CALL.search(text)
-        if sm2:
-            window2 = text[sm2.start():sm2.start() + 200]
-            if _SHELL_INTERP_MARK.search(window2) and not _SHELL_ESCAPED_INLINE.search(window2):
-                file_findings.append(SourceFinding(
-                    "SRC-019", Severity.MEDIUM,
-                    "Unescaped interpolation into a shell command (broad check)",
-                    "A variable is interpolated into a shell command string "
-                    "passed to exec/system, with no escaping helper "
-                    "(shlex.quote/shellQuote/escapeShellArg) applied at this "
-                    "call site. Unlike SRC-009, this fires without requiring "
-                    "evidence the repo already knows the risk elsewhere -- "
-                    "broader recall, so treat this one as a lead to confirm "
-                    "even more than the other source-audit rules: check "
-                    "whether the interpolated value can ever be influenced "
-                    "by a tool caller (directly or via prompt injection).",
-                    f"{rel}:{_line_of(text, sm2.start())}",
-                    window2[:90].strip(),
-                    "Use an argv-array exec (execFile/spawn with an args "
-                    "list, or subprocess.run([...], shell=False)) or quote "
-                    "the interpolated value with shlex.quote/shellQuote "
-                    "before building the shell string.",
-                    7.0,
-                ))
+        site2 = _broad_shell_injection_site(text)
+        if site2:
+            sm2_start, window2 = site2
+            file_findings.append(SourceFinding(
+                "SRC-019", Severity.MEDIUM,
+                "Unescaped interpolation into a shell command (broad check)",
+                "A variable is interpolated into a shell command string "
+                "passed to exec/system, with no escaping helper "
+                "(shlex.quote/shellQuote/escapeShellArg) applied at this "
+                "call site. Unlike SRC-009, this fires without requiring "
+                "evidence the repo already knows the risk elsewhere -- "
+                "broader recall, so treat this one as a lead to confirm "
+                "even more than the other source-audit rules: check "
+                "whether the interpolated value can ever be influenced "
+                "by a tool caller (directly or via prompt injection).",
+                f"{rel}:{_line_of(text, sm2_start)}",
+                window2[:90].strip(),
+                "Use an argv-array exec (execFile/spawn with an args "
+                "list, or subprocess.run([...], shell=False)) or quote "
+                "the interpolated value with shlex.quote/shellQuote "
+                "before building the shell string.",
+                7.0,
+            ))
 
         # SRC-020: unencoded value built directly into a URL query string --
         # the statically-checkable root cause behind HTTP Parameter Pollution

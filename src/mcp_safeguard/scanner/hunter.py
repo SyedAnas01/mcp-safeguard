@@ -5442,7 +5442,10 @@ class TaintShapedHunter:
         if angle != "taint-shaped":
             raise ValueError(f"TaintShapedHunter only implements the 'taint-shaped' angle, got {angle!r}")
 
-        from .pipeline import _process_finding, build_claim_card  # lazy: avoids a hunter<->pipeline import cycle
+        from .pipeline import (  # lazy: avoids a hunter<->pipeline import cycle
+            _process_finding,
+            build_claim_card,
+        )
 
         root = Path(repo_path).resolve()
         _t0 = time.monotonic()

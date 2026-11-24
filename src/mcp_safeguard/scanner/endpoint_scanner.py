@@ -9,7 +9,11 @@ from dataclasses import dataclass
 import httpx
 
 from mcp_safeguard import __version__
-from mcp_safeguard.security.input_validator import resolves_to_unsafe_ip
+from mcp_safeguard.security.input_validator import (
+    ValidationError,
+    resolve_pinned_ip,
+    resolves_to_unsafe_ip,
+)
 
 from .prompt_injection import Severity
 
@@ -133,23 +137,52 @@ def _resolves_to_unsafe_ip(host: str) -> bool:
     DNS-rebinding guard: resolve `host` and reject if any resolved address is
     private/reserved (full RFC1918/ULA/link-local) or a cloud metadata IP.
 
-    An allowlisted-looking hostname can still be rebound via DNS to point at
-    an internal address or the cloud metadata endpoint at request time, so
-    hostname-only allowlist checks are not sufficient on their own. Delegates
-    to the shared, full-coverage implementation in input_validator.py (which
-    server.py's scan-target intake also uses) rather than re-implementing a
-    narrower, link-local-only check here.
+    Delegates to the shared, full-coverage implementation in
+    input_validator.py rather than re-implementing a narrower,
+    link-local-only check here.
+
+    NOTE: scan_endpoints() itself no longer calls this -- a boolean
+    "is this hostname safe" answer isn't enough to also close the
+    DNS-rebinding TOCTOU between validating `host` and actually connecting to
+    it, since a second, independent resolution at connect time can answer
+    differently. scan_endpoints() uses resolve_pinned_ip() instead, which
+    applies this same "reject if ANY resolved address is unsafe" rule but
+    also hands back the one IP to actually connect to. This function is kept
+    for its own direct test coverage and as a simple standalone check.
     """
     return resolves_to_unsafe_ip(host)
 
 
 def _port_open(host: str, port: int, timeout: float = 2.0) -> bool:
-    """Check if a TCP port is open."""
+    """
+    Check if a TCP port is open.
+
+    `host` must already be a pinned IP literal by the time it reaches here
+    (see scan_endpoints' use of resolve_pinned_ip) -- passing a hostname
+    instead makes socket.create_connection() resolve it again independently
+    of whatever validation the caller already did, reopening the exact
+    DNS-rebinding TOCTOU this function's callers exist to close.
+    """
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
     except (TimeoutError, OSError):
         return False
+
+
+def _ssrf_blocked_finding(host: str, port: int) -> EndpointFinding:
+    """The single EP-SSRF-001 finding returned when a scan target fails
+    either the hostname-allowlist check or DNS-rebinding-safe resolution."""
+    return EndpointFinding(
+        rule_id="EP-SSRF-001",
+        severity=Severity.CRITICAL,
+        title="SSRF Protection: Scan Target Blocked",
+        description=f"Host '{host}' is not in the SSRF allowlist and was blocked to prevent server-side request forgery.",
+        location=f"{host}:{port}",
+        evidence=host,
+        remediation="Only scan trusted, explicitly allowlisted hosts. Do not pass untrusted user input as scan targets.",
+        cvss_score=10.0,
+    )
 
 
 async def scan_endpoints(
@@ -174,26 +207,31 @@ async def scan_endpoints(
     """
     findings: list[EndpointFinding] = []
 
-    if not _is_ssrf_safe(host, ssrf_allowlist) or _resolves_to_unsafe_ip(host):
-        return [
-            EndpointFinding(
-                rule_id="EP-SSRF-001",
-                severity=Severity.CRITICAL,
-                title="SSRF Protection: Scan Target Blocked",
-                description=f"Host '{host}' is not in the SSRF allowlist and was blocked to prevent server-side request forgery.",
-                location=f"{host}:{port}",
-                evidence=host,
-                remediation="Only scan trusted, explicitly allowlisted hosts. Do not pass untrusted user input as scan targets.",
-                cvss_score=10.0,
-            )
-        ]
+    if not _is_ssrf_safe(host, ssrf_allowlist):
+        return [_ssrf_blocked_finding(host, port)]
+
+    # Resolve `host` ONCE and pin every actual connection below to that single
+    # validated IP -- never `host` itself again. This used to be
+    # `_resolves_to_unsafe_ip(host)` (a boolean gate), after which
+    # _port_open()/the httpx client below independently re-resolved `host` at
+    # connect time -- a DNS-rebinding TOCTOU: an attacker's DNS server can
+    # answer this validation lookup with a safe IP and every later lookup with
+    # a private/internal one. Same bug class, same fix, as scan_mcp_server's
+    # DNS-rebinding fix in server.py -- see resolve_pinned_ip()'s docstring in
+    # input_validator.py.
+    try:
+        pinned_ip = resolve_pinned_ip(host)
+    except ValidationError:
+        return [_ssrf_blocked_finding(host, port)]
 
     scheme = "https" if use_tls else "http"
-    base_url = f"{scheme}://{host}:{port}"
+    base_url = f"{scheme}://{host}:{port}"  # for findings/display only -- never connected to directly
+    connect_host = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+    connect_base_url = f"{scheme}://{connect_host}:{port}"
 
     # Check dangerous ports
     for check_port, service, severity, rule_id, cvss_score in _DANGEROUS_PORTS:
-        if check_port != port and _port_open(host, check_port):
+        if check_port != port and _port_open(pinned_ip, check_port):
             findings.append(
                 EndpointFinding(
                     rule_id=rule_id,
@@ -216,11 +254,23 @@ async def scan_endpoints(
         # above, and needs to tolerate self-signed/internal certs on the scan
         # target -- see SRC-013's own comment in source_scanner.py.
         follow_redirects=False,
-        headers={"User-Agent": f"mcp-safeguard/{__version__} security-scanner"},
+        headers={
+            "User-Agent": f"mcp-safeguard/{__version__} security-scanner",
+            # Explicit Host header keeps virtual-hosting correct even though
+            # the connection itself (connect_base_url) targets pinned_ip, not
+            # `host` -- same pattern as server.py's pinned-IP fallback client.
+            "Host": host,
+        },
     ) as client:
         for path, severity, rule_id, title, cvss_score in _SENSITIVE_PATHS:
             try:
-                response = await client.get(f"{base_url}{path}")
+                # extensions={"sni_hostname": ...} keeps TLS SNI/certificate
+                # validation anchored to `host` even though connect_base_url's
+                # host is the pinned IP literal -- see server.py's identical
+                # use of this extension for its own pinned-IP fallback client.
+                response = await client.get(
+                    f"{connect_base_url}{path}", extensions={"sni_hostname": host}
+                )
                 status = response.status_code
 
                 # 200/20x indicates the endpoint is live

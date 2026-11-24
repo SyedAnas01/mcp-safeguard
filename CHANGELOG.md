@@ -2,6 +2,35 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.10.1] - 2026-11-24
+
+### Fixed
+
+- Requires fastmcp>=4.2 and mcp>=2.0. Older versions made live-server scans fail with a TypeError in the MCP client timeout, returning no findings.
+- `--output` was ignored when `--format json` or `--format sarif` was set, for both `scan` and
+  `scan-source`. The report only went to stdout, so the documented CI recipe
+  (`--format sarif --output results.sarif`) and the GitHub Action never produced a SARIF file and
+  nothing reached code scanning. The file is now written, and the explicit `--format` wins over the
+  file extension.
+- SRC-019 (shell injection, broad check) now covers `subprocess.check_output` / `check_call` /
+  `Popen`, `os.popen`, `subprocess.getoutput`, and `child_process.execSync`; commands built by
+  concatenation, `str.format` or `%` formatting; and a tool parameter passed straight into a
+  shell call (`def run(cmd): subprocess.run(cmd, shell=True)`). The call's own argument list is now
+  bounded by paren matching instead of a fixed window, and every call site in a file is checked,
+  not just the first.
+- Credential scan: the by-name env check (CRED-018..028) now runs on each server's `env` inside
+  `mcpServers` (Claude Desktop) and `servers` (VS Code), not only a top-level `env`. CRED-016 now
+  matches current OpenAI key formats (`sk-proj-`, `sk-svcacct-`, `sk-admin-`).
+- Restored `resolve_pinned_ip()` and the pinned-IP connection path in `endpoint_scanner.py`. The
+  0.10.0 merge had dropped them, which reopened the DNS-rebinding TOCTOU fixed in 0.9.3 and made
+  `import mcp_safeguard.server` fail with an ImportError.
+- Release pipeline. The 0.9.5 and 0.9.6 GitHub releases never reached PyPI because `pyproject.toml`
+  still said 0.9.4 (PyPI rejected the upload as "File already exists"), and 0.10.0 failed its test
+  gate because CI did not install the tree-sitter grammars the new entrypoint tests import. CI and
+  the publish workflow now install those grammars, and the publish job refuses to run when the
+  release tag does not match the package version. 0.10.1 is the first release after 0.9.4 to reach
+  PyPI.
+
 ## [0.9.4] - 2026-10-19
 
 ### Changed
