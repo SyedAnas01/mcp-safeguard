@@ -118,6 +118,47 @@ runs:
         echo "report-path=$OUTPUT" >> "$GITHUB_OUTPUT"
         echo "exit-code=$CODE" >> "$GITHUB_OUTPUT"
 
+        # Job summary: finding counts plus a README badge snippet.
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          python - "$OUTPUT" "$FORMAT" "$CODE" "$FAIL_ON" >> "$GITHUB_STEP_SUMMARY" <<'PY' || true
+        import json, os, sys
+        path, fmt, code, fail_on = sys.argv[1:5]
+        counts = {}
+        try:
+            data = json.load(open(path))
+            if fmt == "sarif":
+                run = data["runs"][0]
+                score = {r["id"]: float((r.get("properties") or {}).get("security-severity", 0))
+                         for r in run["tool"]["driver"].get("rules", [])}
+                for r in run["results"]:
+                    s = score.get(r.get("ruleId"), 0)
+                    sev = "CRITICAL" if s >= 9 else "HIGH" if s >= 7 else "MEDIUM" if s >= 4 else "LOW" if s > 0 else "INFO"
+                    counts[sev] = counts.get(sev, 0) + 1
+            elif fmt == "json":
+                for f in data:
+                    s = str(f.get("severity", "INFO")).upper()
+                    counts[s] = counts.get(s, 0) + 1
+        except Exception:
+            pass
+        status = "passed" if code == "0" else f"failed (findings at or above {fail_on})"
+        print("## mcp-safeguard\n")
+        print(f"Result: **{status}**\n")
+        if counts:
+            print("| Severity | Findings |\n|---|---|")
+            for k in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
+                if k in counts:
+                    print(f"| {k} | {counts[k]} |")
+            print()
+        repo = os.environ.get("GITHUB_REPOSITORY", "OWNER/REPO")
+        wf = os.environ.get("GITHUB_WORKFLOW_REF", "").split("@")[0].split("/")[-1] or "mcp-safeguard.yml"
+        print("Add the live status badge to your README:\n")
+        print("```markdown")
+        print(f"[![MCP security](https://github.com/{repo}/actions/workflows/{wf}/badge.svg)](https://github.com/{repo}/actions/workflows/{wf}) "
+              "[![scanned by mcp-safeguard](https://img.shields.io/badge/scanned%20by-mcp--safeguard-2b6cb0)](https://github.com/SyedAnas01/mcp-safeguard)")
+        print("```")
+        PY
+        fi
+
         if [ "$CODE" -ne 0 ] && [ "$CONTINUE" != "true" ]; then
           echo "::error::mcp-safeguard exited $CODE (fail-on=$FAIL_ON)"
           exit "$CODE"
