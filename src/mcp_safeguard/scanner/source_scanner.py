@@ -772,9 +772,20 @@ _INBOUND_AUTH_CHECK = re.compile(
     # entrypoint file imports an OAuth provider class rather than reading a
     # header directly; an earlier version of this rule only recognized the
     # direct-header-read shape and missed this equally common one.
-    r"\w*(?:OAuth|Auth)Provider\b|\bauth\s*=\s*\w",
+    r"\w*(?:OAuth|Auth)Provider\b|\bauth\s*=\s*\w|"
+    # Bearer-token auth implemented in the file or via an imported auth
+    # manager (czlonkowski/n8n-mcp http-server.ts: AuthManager +
+    # AUTH_TOKEN + buildBearerChallenge, previously a false positive).
+    r"\bAuthManager\b|\bauthManager\b|\bAUTH_TOKEN\b|Bearer\s|BearerChallenge",
     re.IGNORECASE,
 )
+# Build-tool and bundler config files start dev/static servers that are not
+# the MCP server itself (apify build.js esbuild .serve(), vite configs).
+_BUILD_TOOL_FILE = re.compile(
+    r"(?:^|/)(?:build|(?:vite|webpack|rollup|esbuild)(?:\.[\w-]+)*\.config)\.[cm]?[jt]s$"
+)
+# A listen() call bound to a Unix-domain socket path, not a TCP port.
+_UNIX_SOCKET_LISTEN = re.compile(r"\.listen\(\s*\{[^}]{0,200}\bpath\s*:|\.listen\(\s*[\w.]*sock(?:et)?Path\b", re.IGNORECASE)
 # A thin entrypoint file (construct the server, delegate every tool/route
 # registration to another module via a single `register_tools(mcp)`-shaped
 # call, then serve) genuinely cannot be judged for auth from its own text --
@@ -1118,11 +1129,20 @@ _WS_SERVER_CTOR = re.compile(
     r"""\bws\.Server\(([^;\n]{0,150})|\bsocket\.io\(([^;\n]{0,150})"""
 )
 _PUBLIC_LITERAL_IN_CALL = re.compile(r"0\.0\.0\.0")
+_SERVER_START = re.compile(
+    r"\.listen\(|createServer\(|uvicorn\.run\(|\bapp\.run\(|\.run\([^)]*\bport\b|"
+    r"HTTPServer\(|TCPServer\(|serve_forever\(|\.serve\(|\bserve\(|"
+    r"WebSocketServer|ws\.Server|socket\.io\(|\.bind\(|ListenAndServe|"
+    r"TcpListener::bind|web\.run_app\(|start_server\(|websockets\.serve"
+)
 _ORIGIN_CHECK_PRESENT = re.compile(
     r"""req(?:uest)?\.headers(?:\.get)?\(?\s*\[?\s*["']origin["']|"""
     r"""headers\.get\(\s*["']origin["']|Context\.Headers\s*\[\s*["']Origin["']\s*\]|"""
     r"""\.origin\s*(?:==|!=|in\s|not\s+in\s)|checkOrigin\(|verifyOrigin\(|validate_origin\(|"""
-    r"""validateOrigin\(|allowed_origins|allowedOrigins|ALLOWED_ORIGINS""",
+    r"""validateOrigin\(|allowed_origins|allowedOrigins|ALLOWED_ORIGINS|"""
+    # Host-header allowlisting also defeats DNS rebinding (serena
+    # dashboard_api.py trusted_hosts).
+    r"""TrustedHostMiddleware|trusted_hosts|ALLOWED_HOSTS""",
     re.IGNORECASE,
 )
 _ORIGIN_REGEX_UNANCHORED = re.compile(
@@ -1368,7 +1388,15 @@ _SKIP_DIRS = {
     "node_modules", "dist", "vendor", ".git", "__pycache__", "test", "tests",
     "third_party", "thirdparty", ".yarn", "spec", "specs", "__tests__",
     "examples", "example", "demo", "demos", "sample", "samples", "spike", "spikes",
+    # Maintainer tooling and non-shipped code. On the top MCP servers these
+    # produced most of the HIGH findings, none of them reachable at runtime.
+    "scripts", "bench", "benchmark", "benchmarks", "e2e", "evals", "build",
+    "fixtures", "mocks", ".github",
 }
+
+# esbuild/rollup bundles inline node_modules with "// node_modules/<pkg>/..."
+# banners; their code duplicates src/ plus third-party helpers.
+_BUNDLE_MARKER = re.compile(r"^// node_modules/", re.M)
 
 
 def _iter_source(root: Path):
@@ -1391,6 +1419,8 @@ def _iter_source(root: Path):
         try:
             raw = p.read_text(encoding="utf-8", errors="ignore")
         except OSError:
+            continue
+        if len(_BUNDLE_MARKER.findall(raw, 0, 2_000_000)) >= 3:
             continue
         if lexical.classify_file_content(lexical.FileRole.PRODUCTION, raw) is not lexical.FileRole.PRODUCTION:
             continue
@@ -2037,6 +2067,8 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             and "stdio" not in nsm_context.lower()
             and file_is_judgeable
             and not _INBOUND_AUTH_CHECK.search(text)
+            and not _BUILD_TOOL_FILE.search(rel)
+            and not _UNIX_SOCKET_LISTEN.match(text, nsm.start())
         ):
             file_findings.append(SourceFinding(
                 "SRC-021", Severity.HIGH,
@@ -2205,6 +2237,22 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                 cand_line_prefix = text[cand_line_start:cand.start()].lstrip()
                 if cand_line_prefix.startswith(("//", "#", "*")):
                     continue
+                call_args = text[text.find("(", cand.start()) + 1:cand.end() + 60]
+                # A typed parameter list is a function DEFINITION, not a
+                # call (apify-mcp-server client.ts: a custom
+                # `fetch(input: Request | URL | string, init?)` wrapper).
+                if re.match(r"\s*\w+\??\s*:\s*[A-Za-z]", call_args):
+                    continue
+                # The host is fixed when the URL starts from a constant or
+                # a base-URL getter and only the path varies (upstash/
+                # context7: fetch(`${CONTEXT7_API_BASE_URL}${PATH}`),
+                # fetch(`${getBaseUrl()}/api/...`)).
+                if re.match(
+                    r"\s*(?:f?[\"'`])?\s*(?:\$?\{\s*)?(?:[A-Z][A-Z0-9_]*\b(?!\s*\()|"
+                    r"get\w*(?:Base|Api)\w*Url\(\))",
+                    call_args,
+                ):
+                    continue
                 um = cand
                 break
             if um is not None:
@@ -2370,6 +2418,10 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             bm = _RAW_BODY_LOGGED.search(window)
             if not bm or _REDACTION_APPLIED.search(window[:bm.end()]):
                 continue
+            # `err instanceof Error ? err.message : String(err)` logs the
+            # message; String(err) is only the non-Error fallback.
+            if re.search(r"\.message\s*:\s*$", window[:bm.start()]):
+                continue
             file_findings.append(SourceFinding(
                 "SRC-028", Severity.HIGH,
                 "Full upstream response/exception body logged with no redaction",
@@ -2407,12 +2459,32 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             if not _STATIC_ENV_SOURCE.search(tm.group(2))
         ]
         if tok_matches:
-            wm = _PLAINTEXT_WRITE_CALL.search(text)
-            if wm and wm.start() > tok_matches[0].start():
+            tok_names = {tm.group(1) for tm in tok_matches}
+            wm = None
+            for cand in _PLAINTEXT_WRITE_CALL.finditer(text):
+                if cand.start() <= tok_matches[0].start():
+                    continue
+                stmt_end = text.find(";", cand.end())
+                stmt_nl = text.find("\n", cand.end())
+                ends = [e for e in (stmt_end, stmt_nl) if e != -1]
+                args = text[cand.start():min(ends) if ends else len(text)]
+                # The write must plausibly carry the secret: a token variable
+                # by name, or a token/credential/config-named target or
+                # payload (bank-mcp writes CONFIG_PATH, data).
+                # Previously fired on ANY later write in a file that merely
+                # mentioned a token (context-mode doctor-issue.ts,
+                # context7 toml-editor.ts/setup.ts), all false positives.
+                if any(n in args for n in tok_names) or re.search(
+                    r"token|secret|credential|config|auth", args, re.IGNORECASE
+                ):
+                    wm = cand
+                    break
+            if wm:
                 window = text[max(0, wm.start() - 150):wm.start() + 250]
+                restrictive_mode = re.search(r"mode\s*[:=]\s*(?:0o?600|384|\w*MODE\b)|chmod\w*\([^)]*0o?600", window)
                 if not _ENCRYPTION_CALL.search(window):
                     file_findings.append(SourceFinding(
-                        "SRC-029", Severity.HIGH,
+                        "SRC-029", Severity.MEDIUM if restrictive_mode else Severity.HIGH,
                         "Live access token/secret written to disk in plaintext",
                         "A token/secret variable (access_token, refresh_token, "
                         "session_token, api_secret, bank_token, or a generic "
@@ -2502,6 +2574,15 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
             # `#[cfg(test)]` attribute in the preceding ~500 chars -- real
             # production bind code has no reason to sit that close to one.
             preceding = text[max(0, lbm.start() - 800):lbm.start()]
+            # A loopback URL printed in a startup log line is not a bind
+            # (upstash/context7 index.ts: "running on HTTP at
+            # http://localhost:${port}/mcp" after app.listen(port), which
+            # binds every interface).
+            if "://" in statement and re.search(
+                r"(?:console|logger|log|logging)\.\w+\(\s*[`'\"]?[^)\n]*\n?[^)\n]*$",
+                preceding[-200:],
+            ):
+                continue
             if "://" in statement and re.search(
                 r"#\[\s*(?:tokio::)?test\s*\]|#\[cfg\(test\)\]|#\[rstest\]", preceding
             ):
@@ -2514,6 +2595,16 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                 if not _PUBLIC_LITERAL_IN_CALL.search(call_args):
                     loopback_m = wsm
                     break
+        if (
+            loopback_m is not None
+            and loopback_m.re is _LOOPBACK_BIND
+            and (not _SERVER_START.search(text) or _BUILD_TOOL_FILE.search(rel))
+        ):
+            # A loopback host/URL in a file that never starts a listener is a
+            # client connecting out (chrome-devtools-mcp BrowserManager.ts
+            # ws://127.0.0.1 CDP connect, serena language-server clients),
+            # not a bind.
+            loopback_m = None
         if loopback_m and not _ORIGIN_CHECK_PRESENT.search(text):
             file_findings.append(SourceFinding(
                 "SRC-026", Severity.HIGH,
@@ -2758,6 +2849,9 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                         "don't match.",
                         8.1,
                     ))
+                    # One finding per file: n8n-mcp reported the same
+                    # session-store pattern 5 times in one file.
+                    break
 
         # SRC-033: a caller-controlled simulate/dry_run boolean, defaulting
         # to the safe value, is the only thing gating a private-key
