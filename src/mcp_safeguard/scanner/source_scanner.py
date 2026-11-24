@@ -684,11 +684,25 @@ def _first_arg_is_enclosing_param(text: str, call_start: int, args: str) -> bool
     return re.search(r"(?<![\w$])" + re.escape(ident) + r"(?![\w$])", params) is not None
 
 
+_CHILD_PROCESS_IMPORT = re.compile(
+    r"require\(\s*[\"'](?:node:)?child_process[\"']\s*\)|from\s+[\"'](?:node:)?child_process[\"']"
+)
+_LOCAL_EXEC_DEF = re.compile(
+    r"\bfunction\s+exec(?:Sync)?\s*\(|\b(?:var|let|const)\s+exec(?:Sync)?\s*=\s*(?:function\b|\()"
+)
+
+
 def _broad_shell_injection_site(text: str):
     """First shell-executing call site whose command is built from pieces or
     is a caller-supplied parameter, with no inline escaping helper. Returns
     (start_index, call_text) or None."""
+    # A bare exec()/execSync() is only a shell call when it comes from
+    # child_process; Python's builtin exec and bundled helpers named exec
+    # (e.g. wrap-ansi) are not.
+    bare_exec_ok = bool(_CHILD_PROCESS_IMPORT.search(text)) and not _LOCAL_EXEC_DEF.search(text)
     for m in _SHELL_CALL_NAME_BROAD.finditer(text):
+        if m.group(0).startswith("exec") and not bare_exec_ok:
+            continue
         open_idx = m.end() - 1
         end = _matching_paren_end(text, open_idx)
         call = text[m.start():min(end, m.start() + 600)]

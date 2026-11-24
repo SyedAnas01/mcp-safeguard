@@ -89,6 +89,8 @@ def test_src019_detects_shell_injection_shapes(tmp_path, code, name):
     ('import subprocess\nsubprocess.run("ls -la", shell=True)\n', "b.py"),
     ('import subprocess, shlex\ndef ls(p):\n    subprocess.run(f"ls {shlex.quote(p)}", shell=True)\n', "c.py"),
     ('const m = /a(b)/.exec(input);\n', "d.js"),
+    ('function exec(s, c) { return s; }\nfunction wrap(line) { return exec(`${line}`, 80); }\n', "g.js"),
+    ('def run(code):\n    exec(f"x = {code}")\n', "h.py"),
     ('import subprocess\nCMD = "uptime"\ndef up():\n    return subprocess.run(CMD, shell=True)\n', "e.py"),
 ])
 def test_src019_ignores_safe_shapes(tmp_path, code, name):
