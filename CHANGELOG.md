@@ -2,6 +2,30 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.10.2] - 2026-11-24
+
+### Changed
+
+Fewer false positives. Scanning six popular MCP servers (context7, chrome-devtools-mcp,
+context-mode, serena, n8n-mcp, apify-mcp-server) with 0.10.1 gave 86 HIGH findings, none of
+them real. 0.10.2 reports 13 on the same commits. Every exclusion below has a regression test,
+and the rules still fire on the vulnerable shapes they were built from.
+
+- `scan-source` skips `scripts/`, `bench*/`, `e2e/`, `evals/`, `build/`, `fixtures/`, `mocks/`
+  and `.github/`, and skips bundled JavaScript (files with several `// node_modules/` markers).
+- SRC-021 (listener with no auth): skips Unix-domain-socket listeners, build-tool and bundler
+  config files, and recognizes bearer-token auth (`AuthManager`, `AUTH_TOKEN`, `Bearer`).
+- SRC-026 (loopback server, no Origin check): only fires when the file actually starts a server.
+  A loopback URL used to connect out, or printed in a startup log line, is not a bind.
+  Host-header allowlists (`TrustedHostMiddleware`, `trusted_hosts`, `ALLOWED_HOSTS`) count as
+  DNS-rebinding protection.
+- SRC-023 (outbound fetch of a caller URL): skips fetch wrapper definitions and URLs that start
+  from a constant or a base-URL getter, where only the path varies.
+- SRC-028 (raw error body logged): skips `err instanceof Error ? err.message : String(err)`.
+- SRC-029 (token written in plaintext): the write must involve a token, credential or config
+  value, not any later write in the same file. Writes with mode `0o600` are MEDIUM.
+- SRC-032 (session id reuse): one finding per file instead of one per handler.
+
 ## [0.10.1] - 2026-11-24
 
 ### Fixed
