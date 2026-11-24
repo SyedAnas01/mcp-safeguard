@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev]" "tree-sitter>=0.25" "tree-sitter-javascript>=0.23" "tree-sitter-typescript>=0.23" "tree-sitter-go>=0.23" "tree-sitter-kotlin>=1.1" "anthropic>=0.40"
+        pip install -e ".[dev]" "tree-sitter>=0.25" "tree-sitter-javascript>=0.23" "tree-sitter-typescript>=0.23" "tree-sitter-go>=0.23" "tree-sitter-kotlin>=1.1" "anthropic>=0.40" semgrep
     - name: Run tests
       run: pytest tests/ -v --tb=short
 

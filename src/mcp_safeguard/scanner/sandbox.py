@@ -661,6 +661,11 @@ def _run_docker_container(
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
     ]
+    # Run as the invoking user. With --cap-drop ALL, a root container loses
+    # DAC override and cannot write into a host scratch dir created 0700 by
+    # mkdtemp (Linux CI runners); matching the host uid also avoids root.
+    if hasattr(os, "getuid"):
+        cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
     for host_path, container_path, mode in mounts:
         cmd += ["-v", f"{host_path}:{container_path}:{mode}"]
     for key, value in env.items():
