@@ -6,6 +6,7 @@ All notable changes to mcp-safeguard are documented here.
 
 ### Fixed
 
+- Requires fastmcp>=4.2 and mcp>=2.0. Older versions made live-server scans fail with a TypeError in the MCP client timeout, returning no findings.
 - `--output` was ignored when `--format json` or `--format sarif` was set, for both `scan` and
   `scan-source`. The report only went to stdout, so the documented CI recipe
   (`--format sarif --output results.sarif`) and the GitHub Action never produced a SARIF file and
