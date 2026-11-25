@@ -32,7 +32,7 @@ jobs:
           output: config-findings.json
           upload-sarif: 'false'
           continue-on-error: 'true'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: config-findings
           path: config-findings.json
@@ -51,7 +51,7 @@ jobs:
           output: source-findings.sarif
           upload-sarif: 'false'
           continue-on-error: 'true'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: source-findings
           path: source-findings.sarif

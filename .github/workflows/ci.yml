@@ -60,7 +60,7 @@ jobs:
       run: mcp-safeguard scan examples/demo-vulnerable-config.json --output security-report.json --format json || true
     - name: Upload security report
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: security-report
         path: security-report.json
