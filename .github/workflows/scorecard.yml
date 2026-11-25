@@ -19,7 +19,7 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: ossf/scorecard-action@56eaeac26fc540dfface1f07f79b9426f1956b4d # v2.6.0 (image on ghcr.io; v2.4.0 pulled from gcr.io, now billing-blocked)
