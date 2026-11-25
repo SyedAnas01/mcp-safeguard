@@ -57,7 +57,11 @@ Two things live here, both fully unit-testable with no live LLM call:
 from __future__ import annotations
 
 import ast
+import functools
+import json
+import os
 import time
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -73,6 +77,8 @@ from .critic import (
     _py_callee_name,
     check_reachability_soundness,
 )
+from .cross_file import find_python_function
+from .deployment_profile import DeploymentProfile, compute_deployment_profile
 from .lexical import strip_comments_and_docstrings
 from .prompt_injection import Severity
 from .sandbox import OracleTrace
@@ -82,6 +88,19 @@ from .untrusted_text import UNTRUSTED_CONTENT_WARNING, wrap_untrusted
 from .verify import Verdict, build_anthropic_client
 
 _VALID_VERDICTS = frozenset(("confirmed", "refuted", "unconfirmed"))
+
+# WS5 (plan C2): the repo-reading path may also answer `confirmed-conditional`
+# -- the mechanism is real in the code, but exploitability rests on a named
+# deployment assumption the repo cannot establish either way (e.g. "one
+# transport instance shared across unrelated callers"). `_VALID_VERDICTS`
+# above is deliberately unchanged (the bare-prompt path has no such option);
+# this wider set is what the repo-reading/residue backends and
+# `requires_agreement` accept. It maps to the existing `adversary-reviewed`
+# ledger tier (ledger.py is not changed by this milestone) and is surfaced
+# through `AdversaryCheckResult.conditional`/`.assumption`.
+CONDITIONAL_VERDICT = "confirmed-conditional"
+_VALID_VERDICTS_V2 = _VALID_VERDICTS | {CONDITIONAL_VERDICT}
+_CONFIRMING = frozenset(("confirmed", CONDITIONAL_VERDICT))
 
 
 def build_adversary_prompt(claim_card: ClaimCard) -> str:
@@ -213,11 +232,17 @@ def requires_agreement(verdict_a: Verdict, verdict_b: Verdict, impact_basis_b: s
     specified ("no changes to `_VALID_VERDICTS`, tier mapping, or ledger" --
     this is the same guarantee applied to `requires_agreement` itself)."""
     for v in (verdict_a, verdict_b):
-        if v not in _VALID_VERDICTS:
-            raise ValueError(f"not a recognized verdict: {v!r} -- expected one of {sorted(_VALID_VERDICTS)}")
+        if v not in _VALID_VERDICTS_V2:
+            raise ValueError(f"not a recognized verdict: {v!r} -- expected one of {sorted(_VALID_VERDICTS_V2)}")
 
     agreed = verdict_a == verdict_b
-    final: Verdict = verdict_a if (agreed and verdict_a in ("confirmed", "refuted")) else "unconfirmed"
+    if verdict_a in _CONFIRMING and verdict_b in _CONFIRMING:
+        # confirmed + confirmed-conditional: both think the mechanism is real;
+        # the weaker (conditional) reading governs. Not a disagreement.
+        agreed = True
+        final: Verdict = CONDITIONAL_VERDICT if CONDITIONAL_VERDICT in (verdict_a, verdict_b) else "confirmed"  # type: ignore[assignment]
+    else:
+        final = verdict_a if (agreed and verdict_a in ("confirmed", "refuted")) else "unconfirmed"
     return FinalVerdict(
         verdict=final, verdict_a=verdict_a, verdict_b=verdict_b, agreed=agreed, impact_basis=impact_basis_b
     )
@@ -275,6 +300,9 @@ class AdversaryResult:
     severity: Severity = Severity.INFO
     cwe: str | None = None
     impact_basis: str | None = None
+    # WS5: the named deployment assumption behind a `confirmed-conditional`
+    # verdict; `None` for every other verdict.
+    assumption: str | None = None
 
 
 class AdversaryBackend(Protocol):
@@ -309,6 +337,48 @@ _ADVERSARY_TOOL_SCHEMA = {
         "required": ["verdict", "severity", "cwe", "reasoning"],
     },
 }
+
+
+_ADVERSARY_TOOL_SCHEMA_V2 = {
+    "name": "submit_adversary_verdict",
+    "description": _ADVERSARY_TOOL_SCHEMA["description"],
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            **_ADVERSARY_TOOL_SCHEMA["input_schema"]["properties"],
+            "verdict": {"type": "string", "enum": sorted(_VALID_VERDICTS_V2)},
+            "assumption": {
+                "type": "string",
+                "description": (
+                    "Only for verdict 'confirmed-conditional': the single concrete deployment condition "
+                    "under which the finding is exploitable. Empty otherwise."
+                ),
+            },
+        },
+        "required": ["verdict", "severity", "cwe", "reasoning"],
+    },
+}
+
+
+def _result_from_tool_input(data: dict[str, Any], model: str, *, impact_basis: Any = None) -> AdversaryResult:
+    """Repo-reading/residue backends' shared parse (accepts `confirmed-conditional`).
+    A conditional verdict without a stated assumption is downgraded to
+    `unconfirmed`: an unnamed precondition is not a verdict."""
+    verdict = data.get("verdict")
+    if verdict not in _VALID_VERDICTS_V2:
+        verdict = "unconfirmed"
+    assumption = str(data.get("assumption") or "").strip() or None
+    if verdict == CONDITIONAL_VERDICT and assumption is None:
+        verdict = "unconfirmed"
+    return AdversaryResult(
+        verdict=verdict,
+        reasoning=str(data.get("reasoning", "")),
+        model=model,
+        severity=_parse_adversary_severity(data.get("severity")),
+        cwe=_parse_adversary_cwe(data.get("cwe")),
+        impact_basis=_parse_impact_basis(impact_basis) if impact_basis is not None else None,
+        assumption=assumption if verdict == CONDITIONAL_VERDICT else None,
+    )
 
 
 def _parse_adversary_severity(raw: Any) -> Severity:
@@ -465,6 +535,7 @@ class ManualRecordAdversary:
 # agreement), never plain `"confirmed"`.
 _ADVERSARY_VERDICT_TO_LEDGER_TIER: dict[Verdict, Verdict] = {
     "confirmed": "adversary-reviewed",
+    CONDITIONAL_VERDICT: "adversary-reviewed",
     "refuted": "refuted",
     "unconfirmed": "unconfirmed",
 }
@@ -509,6 +580,10 @@ class AdversaryCheckResult:
     severity: Severity | None = None
     cwe: str | None = None
     impact_basis: str | None = None
+    # WS5: True when the survival is conditional on `assumption` (the
+    # `adversary-reviewed` tier alone does not say so). Reports must show it.
+    conditional: bool = False
+    assumption: str | None = None
 
 
 def run_adversary_check(
@@ -600,6 +675,8 @@ def run_adversary_check(
         severity_note = ""
         if mapped == "adversary-reviewed":
             severity = _one_notch_down(result_a.severity)
+            if result_a.verdict == CONDITIONAL_VERDICT:
+                severity = _one_notch_down(severity)  # conditional: one further notch, never full trust
             cwe = result_a.cwe
             severity_note = (
                 f" | severity/CWE: adversary assessed {result_a.severity.value}"
@@ -617,6 +694,8 @@ def run_adversary_check(
             verdict_a=result_a.verdict,
             severity=severity,
             cwe=cwe,
+            conditional=result_a.verdict == CONDITIONAL_VERDICT,
+            assumption=result_a.assumption if result_a.verdict == CONDITIONAL_VERDICT else None,
         )
 
     try:
@@ -654,6 +733,12 @@ def run_adversary_check(
         # assumption in the residue-test answer caps severity one MORE notch
         # down -- reusing `_one_notch_down` (already imported, already used
         # by the single-backend path above), not new severity logic.
+        if final.verdict == CONDITIONAL_VERDICT:
+            severity = _one_notch_down(severity)
+            severity_note += (
+                " | verdict is confirmed-conditional: severity capped one further notch down because "
+                "exploitability rests on a named deployment assumption"
+            )
         if final.impact_basis is not None and final.impact_basis.startswith("external:"):
             pre_external_cap = severity
             severity = _one_notch_down(severity)
@@ -679,6 +764,12 @@ def run_adversary_check(
         severity=severity,
         cwe=cwe,
         impact_basis=final.impact_basis,
+        conditional=final.verdict == CONDITIONAL_VERDICT,
+        assumption=(
+            " | ".join(dict.fromkeys(a for a in (result_a.assumption, result_b.assumption) if a)) or None
+            if final.verdict == CONDITIONAL_VERDICT
+            else None
+        ),
     )
 
 
@@ -881,10 +972,48 @@ def _read_whole_file_for_adversary(root: Path, rel: str) -> str | None:
     return text
 
 
-def _one_hop_forward_call_targets(root: Path, rel: str, line_no: int) -> list[tuple[str, str]]:
+def _calls_from_py_function(fn_node: ast.FunctionDef | ast.AsyncFunctionDef, current_file: Path, tree: ast.Module, root: Path) -> list[tuple[Path, str]]:
+    """Every real, resolved `(file, function_name)` target `fn_node`'s own
+    body calls into -- the shared Python walk both the origin hop and every
+    deeper hop in `_one_hop_forward_call_targets` reuse, rather than two
+    near-identical copies of the same `ast.walk`+resolve loop."""
+    out: list[tuple[Path, str]] = []
+    for node in ast.walk(fn_node):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _py_callee_name(node.func)
+        if name is None:
+            continue
+        target = _py_call_hop_target(current_file, tree, node, name, root)
+        if target is not None:
+            out.append(target)
+    return out
+
+
+def _calls_from_js_function(fn_node: Any, current_file: Path, root_node: Any, src: bytes, root: Path) -> list[tuple[Path, str]]:
+    """JS/TS sibling of `_calls_from_py_function` -- same shared-walk reason."""
+    from . import entrypoints_js as ejs
+
+    out: list[tuple[Path, str]] = []
+    for node in ejs.walk(fn_node):
+        if node.type != "call_expression":
+            continue
+        callee = node.child_by_field_name("function")
+        if callee is None:
+            continue
+        name = _js_callee_name(callee, src)
+        if name is None:
+            continue
+        target = _js_call_hop_target(current_file, root_node, src, callee, name, root)
+        if target is not None:
+            out.append(target)
+    return out
+
+
+def _one_hop_forward_call_targets(root: Path, rel: str, line_no: int, *, max_depth: int = 1) -> list[tuple[str, str]]:
     """Real, resolved `(root-relative file, function_name)` pairs the
-    enclosing function around `rel:line_no` directly calls into -- ONE hop,
-    reusing critic.py's own real call-edge resolvers
+    enclosing function around `rel:line_no` directly calls into -- ONE hop
+    by default, reusing critic.py's own real call-edge resolvers
     (`_py_call_hop_target`/`_js_call_hop_target`, the same
     same-file-def-or-import-resolved-only discipline
     `check_reachability_soundness`'s own bounded reverse-call search applies
@@ -903,63 +1032,106 @@ def _one_hop_forward_call_targets(root: Path, rel: str, line_no: int) -> list[tu
     resolver rather than reimplement it. `_one_hop_forward_targets` is now a
     thin, file-only wrapper over this function (see below) -- one real walk,
     not two, and its own pre-existing return type/behavior is completely
-    unchanged."""
+    unchanged.
+
+    `max_depth` (keyword-only, default 1 -- every pre-existing caller is
+    completely unaffected): when > 1, additionally re-walks each hop's own
+    resolved target function for ITS calls, one more explicit level at a
+    time, up to `max_depth` hops total from `(rel, line_no)` -- reusing the
+    exact same two-trusted-shapes resolver this function already applies at
+    depth 1 (critic.py's own `depth_remaining`-bounded reverse-call walker,
+    `_python_reaches`/`_js_walk_fn_for_reach`, already proved this identical
+    resolver-reuse-across-depths pattern safe for a different purpose: "is
+    X reachable from Y within N hops"). Added for the serverless-serverless
+    sealed-holdout gap (`project-finder.js`, two real cross-file hops from
+    the nearest recovered entrypoint -- `tools-definition.js` -> `list-
+    projects.js` -> `project-finder.js` -- confirmed MISSED across
+    checkpoints 1-4 specifically because this function's evidence-gathering
+    callers only ever saw one hop). A (file, function_name) pair already
+    visited at a shallower depth is never re-walked (cycle protection for
+    mutual/self-recursive helpers) -- still no general call graph, just one
+    more bounded, explicit hop than before."""
     suffix = Path(rel).suffix
     abs_path = root / rel
-    targets: list[tuple[str, str]] = []
+    targets: list[tuple[Path, str]] = []
 
     if suffix == ".py":
         try:
             text = abs_path.read_text(encoding="utf-8", errors="ignore")
             tree = ast.parse(text)
         except (OSError, SyntaxError):
-            return targets
+            return []
         fn = _find_enclosing_function(tree, line_no)
         if fn is None:
-            return targets
-        for node in ast.walk(fn):
-            if not isinstance(node, ast.Call):
-                continue
-            name = _py_callee_name(node.func)
-            if name is None:
-                continue
-            target = _py_call_hop_target(abs_path, tree, node, name, root)
-            if target is not None:
-                targets.append((str(target[0]), target[1]))
+            return []
+        targets = _calls_from_py_function(fn, abs_path, tree, root)
     elif suffix in (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"):
         try:
             from . import entrypoints_js as ejs
         except ImportError:
-            return targets
+            return []
         parsed = ejs.parse_file(abs_path)
         if parsed is None:
-            return targets
+            return []
         root_node, src = parsed
         fn = ejs.find_enclosing_function(root_node, line_no)
         if fn is None:
-            return targets
-        for node in ejs.walk(fn):
-            if node.type != "call_expression":
-                continue
-            callee = node.child_by_field_name("function")
-            if callee is None:
-                continue
-            name = _js_callee_name(callee, src)
-            if name is None:
-                continue
-            target = _js_call_hop_target(abs_path, root_node, src, callee, name, root)
-            if target is not None:
-                targets.append((str(target[0]), target[1]))
+            return []
+        targets = _calls_from_js_function(fn, abs_path, root_node, src, root)
 
     out: list[tuple[str, str]] = []
+    visited: set[tuple[str, str]] = set()
     for t_file, t_name in targets:
         try:
             rel_t = str(Path(t_file).resolve().relative_to(root))
         except ValueError:
             continue
         pair = (rel_t, t_name)
-        if pair not in out:
+        if pair not in visited:
+            visited.add(pair)
             out.append(pair)
+
+    frontier = list(out)
+    depth = 1
+    while depth < max_depth and frontier:
+        next_frontier: list[tuple[str, str]] = []
+        for f_rel, f_name in frontier:
+            f_abs = root / f_rel
+            f_suffix = Path(f_rel).suffix
+            hop_targets: list[tuple[Path, str]] = []
+            if f_suffix == ".py":
+                found = find_python_function(f_abs, f_name)
+                if found is None:
+                    continue
+                fn_node, fn_tree, _lines = found
+                hop_targets = _calls_from_py_function(fn_node, f_abs, fn_tree, root)
+            elif f_suffix in (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"):
+                try:
+                    from . import entrypoints_js as ejs
+                except ImportError:
+                    continue
+                parsed = ejs.parse_file(f_abs)
+                if parsed is None:
+                    continue
+                f_root_node, f_src = parsed
+                fn_node = ejs.find_function_by_name(f_root_node, f_name, f_src)
+                if fn_node is None:
+                    continue
+                hop_targets = _calls_from_js_function(fn_node, f_abs, f_root_node, f_src, root)
+            for t_file, t_name in hop_targets:
+                try:
+                    rel_t = str(Path(t_file).resolve().relative_to(root))
+                except ValueError:
+                    continue
+                pair = (rel_t, t_name)
+                if pair in visited:
+                    continue
+                visited.add(pair)
+                out.append(pair)
+                next_frontier.append(pair)
+        frontier = next_frontier
+        depth += 1
+
     return out
 
 
@@ -1011,6 +1183,28 @@ def _reverse_hop_reachability_note(claim_card: ClaimCard, root: Path, tmd: Threa
         claim_card, claim_card.oracle_trace, tmd, root=root, max_reverse_call_depth=_REPO_READ_MAX_REVERSE_CALL_DEPTH,
     )
     return soundness.reason
+
+
+@functools.lru_cache(maxsize=32)
+def _cached_deployment_profile(repo_root: str) -> DeploymentProfile:
+    """One repo walk per root per process; the profile is deterministic."""
+    return compute_deployment_profile(repo_root)
+
+
+_CONDITIONAL_VERDICT_SECTION = """
+
+## Conditional verdicts (overrides the three-verdict list above)
+The deployment profile above is computed from the repo, not from the claim. Use it. If the code mechanism \
+is real and you cannot refute it, but whether it is exploitable depends ONLY on a deployment fact the \
+repo cannot settle (for example: "one transport/proxy instance is shared by mutually untrusting callers", \
+"the embedding application exposes this over HTTP without its own auth"), answer \
+`confirmed-conditional` and put that single fact in `assumption`. Rules: (a) the assumption must be a \
+concrete, checkable deployment condition, not a restatement of the bug; (b) if the profile shows the \
+condition cannot hold (e.g. stdio-only, per-process-local) answer `refuted`, not conditional; (c) if \
+the mechanism itself is unproven, answer `unconfirmed`; (d) if nothing but the assumption is left and the \
+assumption is implausible for the documented use of this code, answer `refuted`. `confirmed` still means \
+exploitable under the deployment shown.
+"""
 
 
 def build_shared_repo_evidence_block(claim_card: ClaimCard, repo_root: str | Path) -> str:
@@ -1118,6 +1312,9 @@ def build_shared_repo_evidence_block(claim_card: ClaimCard, repo_root: str | Pat
         + "\n\n".join(wrap_untrusted(s) for s in sections)
         + "\n\n## One-hop-out reachability (reusing critic.py's own check_reachability_soundness directly)\n"
         + wrap_untrusted(reverse_note)
+        + "\n\n"
+        + _cached_deployment_profile(str(root)).render()
+        + _CONDITIONAL_VERDICT_SECTION
     )
 
 
@@ -1200,7 +1397,7 @@ class RepoReadingAdversary:
             model=self._model,
             max_tokens=2000,
             temperature=0,
-            tools=[_ADVERSARY_TOOL_SCHEMA],
+            tools=[_ADVERSARY_TOOL_SCHEMA_V2],
             tool_choice={"type": "tool", "name": "submit_adversary_verdict"},
             messages=[{"role": "user", "content": [
                 {"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}},
@@ -1217,16 +1414,7 @@ class RepoReadingAdversary:
                 reasoning="model did not return the required submit_adversary_verdict tool call",
                 model=self._model,
             )
-        verdict = tool_use.input.get("verdict")
-        if verdict not in _VALID_VERDICTS:
-            verdict = "unconfirmed"
-        return AdversaryResult(
-            verdict=verdict,
-            reasoning=str(tool_use.input.get("reasoning", "")),
-            model=self._model,
-            severity=_parse_adversary_severity(tool_use.input.get("severity")),
-            cwe=_parse_adversary_cwe(tool_use.input.get("cwe")),
-        )
+        return _result_from_tool_input(tool_use.input, self._model)
 
 
 # --------------------------------------------------------------------------
@@ -1384,7 +1572,7 @@ _RESIDUE_TEST_TOOL_SCHEMA = {
     "input_schema": {
         "type": "object",
         "properties": {
-            **_ADVERSARY_TOOL_SCHEMA["input_schema"]["properties"],
+            **_ADVERSARY_TOOL_SCHEMA_V2["input_schema"]["properties"],
             "impact_basis": {
                 "type": "string",
                 "description": (
@@ -1521,14 +1709,108 @@ class ExternalAssumptionAdversary:
                 reasoning="model did not return the required submit_adversary_verdict tool call",
                 model=self._model,
             )
-        verdict = tool_use.input.get("verdict")
-        if verdict not in _VALID_VERDICTS:
-            verdict = "unconfirmed"
-        return AdversaryResult(
-            verdict=verdict,
-            reasoning=str(tool_use.input.get("reasoning", "")),
-            model=self._model,
-            severity=_parse_adversary_severity(tool_use.input.get("severity")),
-            cwe=_parse_adversary_cwe(tool_use.input.get("cwe")),
-            impact_basis=_parse_impact_basis(tool_use.input.get("impact_basis")),
-        )
+        return _result_from_tool_input(tool_use.input, self._model, impact_basis=tool_use.input.get("impact_basis"))
+
+
+
+# --------------------------------------------------------------------------
+# WS5 (plan C3): cross-family adversary hook. Configurable, default unchanged:
+# nothing in pipeline.py calls this unless a caller passes the backend in.
+# No keys live in code -- only the NAME of the environment variable holding
+# the key is configured. Speaks the OpenAI-compatible /chat/completions
+# function-calling dialect (stdlib urllib, no new dependency), which most
+# non-Anthropic providers and local servers expose. Uses the same prompt as
+# Adversary A (repo-reading + deployment profile + conditional verdicts), so
+# only the model family changes.
+#
+#   MCP_SAFEGUARD_ADVERSARY_PROVIDER     "openai-compatible" (unset => no hook)
+#   MCP_SAFEGUARD_ADVERSARY_MODEL        model id at that provider
+#   MCP_SAFEGUARD_ADVERSARY_BASE_URL     e.g. https://api.example.com/v1
+#   MCP_SAFEGUARD_ADVERSARY_API_KEY_ENV  name of the env var holding the key
+# --------------------------------------------------------------------------
+
+
+class CrossFamilyAdversary:
+    """Adversary backend on a different model family than the hunter."""
+
+    def __init__(
+        self,
+        repo_root: str | Path,
+        *,
+        model: str,
+        base_url: str,
+        api_key: str,
+        cost_tracker: CostTracker | None = None,
+        post: Any = None,
+        timeout: float = 120.0,
+    ):
+        self._repo_root = Path(repo_root)
+        self._model = model
+        self._url = base_url.rstrip("/") + "/chat/completions"
+        self._api_key = api_key
+        self._cost_tracker = cost_tracker
+        self._post = post or self._http_post
+        self._timeout = timeout
+
+    def _http_post(self, url: str, headers: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310 -- operator-configured URL
+            return json.loads(resp.read().decode())
+
+    def adjudicate(self, claim_card: ClaimCard) -> AdversaryResult:
+        prompt = build_repo_reading_adversary_prompt(claim_card, self._repo_root)
+        schema = _ADVERSARY_TOOL_SCHEMA_V2
+        body = {
+            "model": self._model,
+            "temperature": 0,
+            "max_tokens": 2000,
+            "messages": [{"role": "user", "content": prompt}],
+            "tools": [{"type": "function", "function": {
+                "name": schema["name"], "description": schema["description"], "parameters": schema["input_schema"],
+            }}],
+            "tool_choice": {"type": "function", "function": {"name": schema["name"]}},
+        }
+        start = time.monotonic()
+        data = self._post(self._url, {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}, body)
+        if self._cost_tracker is not None:
+            usage = data.get("usage") or {}
+            self._cost_tracker.record_usage_dict(
+                "cross-family-adversary", claim_card.target_sink, self._model,
+                {"input_tokens": usage.get("prompt_tokens", 0), "output_tokens": usage.get("completion_tokens", 0)},
+                time.monotonic() - start,
+            )
+        try:
+            call = data["choices"][0]["message"]["tool_calls"][0]["function"]
+            args = json.loads(call["arguments"])
+        except (KeyError, IndexError, TypeError, ValueError):
+            return AdversaryResult(
+                verdict="unconfirmed",
+                reasoning="model did not return a parseable submit_adversary_verdict tool call",
+                model=self._model,
+            )
+        return _result_from_tool_input(args, self._model)
+
+
+def cross_family_adversary_from_env(
+    repo_root: str | Path, *, cost_tracker: CostTracker | None = None, env: dict[str, str] | None = None
+) -> CrossFamilyAdversary | None:
+    """Build the hook from environment config, or `None` when unconfigured
+    (the default: behavior is unchanged). Raises `ValueError` for a partial
+    or unsupported configuration rather than silently falling back."""
+    e = os.environ if env is None else env
+    provider = e.get("MCP_SAFEGUARD_ADVERSARY_PROVIDER")
+    if not provider:
+        return None
+    if provider != "openai-compatible":
+        raise ValueError(f"unsupported MCP_SAFEGUARD_ADVERSARY_PROVIDER {provider!r}; supported: 'openai-compatible'")
+    model, base_url, key_env = (
+        e.get("MCP_SAFEGUARD_ADVERSARY_MODEL"),
+        e.get("MCP_SAFEGUARD_ADVERSARY_BASE_URL"),
+        e.get("MCP_SAFEGUARD_ADVERSARY_API_KEY_ENV"),
+    )
+    if not (model and base_url and key_env):
+        raise ValueError("MCP_SAFEGUARD_ADVERSARY_MODEL, _BASE_URL and _API_KEY_ENV must all be set")
+    key = e.get(key_env)
+    if not key:
+        raise ValueError(f"environment variable {key_env!r} (named by MCP_SAFEGUARD_ADVERSARY_API_KEY_ENV) is empty")
+    return CrossFamilyAdversary(repo_root, model=model, base_url=base_url, api_key=key, cost_tracker=cost_tracker)

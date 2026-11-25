@@ -168,6 +168,14 @@ same reasoning `entrypoints.py`'s shape C already uses. An entrypoint
 already recovered by shapes A-E at the same (file, line) is never
 downgraded -- these three shapes only ever ADD entrypoints A-E missed.
 
+Transitive cross-file callees (shape J) -- see `_recover_transitive_cross_file`:
+a tool handler whose real work sits in a function imported from another file,
+which in turn forwards the tainted argument into a further imported function
+(serverless handler -> dispatcher -> tool handler -> sink). Shapes A-I plus
+the single-hop pass in taint_scanner.py stop one cross-file call below the
+registration; this shape adds hops 2-3, tainted-argument-mapped like
+`cross_file.find_js_cross_file_hops` does, tagged "medium".
+
 Interface-method-override anchoring (shape I) -- SDK-vocab-and-truncation
 -fix milestone, Fix 1a, a FOURTH additive strategy in the same tool-name
 -anchoring family as F/G/H but anchored on the SDK's own TRANSPORT/protocol
@@ -244,6 +252,11 @@ _CLASS_HANDLER_METHOD_NAMES = frozenset({"execute", "run", "call", "handle", "in
 _TRANSPORT_HERITAGE_NAMES = frozenset({"Transport"})
 _TRANSPORT_METHOD_NAMES = frozenset({"handleRequest", "handleConnection"})
 _TRANSPORT_CLASS_NAME_SUFFIXES = ("Transport", "Handler")
+
+# Shape J: how many cross-file call hops below a recovered entrypoint to
+# follow (hop 1 is left to Stage 2/3's own cross-file pass, see
+# `_recover_transitive_cross_file`).
+_TRANSITIVE_MAX_DEPTH = 3
 
 FUNCTION_LIKE_TYPES = frozenset(
     {"function_declaration", "function_expression", "arrow_function", "method_definition",
@@ -590,7 +603,49 @@ def recover_js_entrypoints(root: str | Path) -> list[McpEntrypoint]:
                     path, function_name, line, [params[idx]], "dispatch_call_arguments", "medium"
                 )
 
+    _recover_transitive_cross_file(entrypoints, root)
+
     return sorted(entrypoints.values(), key=lambda e: (str(e.file), e.line))
+
+
+# --------------------------------------------------------------------------
+# Shape J: transitive cross-file callees (see module docstring).
+# --------------------------------------------------------------------------
+
+
+def _recover_transitive_cross_file(entrypoints: dict[tuple[Path, int], McpEntrypoint], root: Path) -> None:
+    """Shape J. Starting from the entrypoints recovered by shapes A-I, follow
+    tainted-argument calls into locally-imported functions
+    (`cross_file.find_js_cross_file_hops`), and keep following them for
+    `_TRANSITIVE_MAX_DEPTH` hops in total. Hop 1 is deliberately NOT added
+    here: Stage 2/3 (taint_scanner.py) already derives hop-1 synthetic
+    entrypoints itself from the entrypoints this function returns. Only
+    hops 2..N, which that single-hop pass could never reach (the serverless
+    handler -> dispatcher -> tool handler chain), are added, tagged
+    "transitive_cross_file_hop" / "medium". Never overwrites an entrypoint
+    already recovered at the same (file, line); a visited set makes import
+    cycles terminate."""
+    from . import cross_file
+
+    frontier = list(entrypoints.values())
+    visited = {(e.file, e.line) for e in frontier}
+    for depth in range(1, _TRANSITIVE_MAX_DEPTH + 1):
+        hops = cross_file.find_js_cross_file_hops(frontier, root)
+        next_frontier: list[McpEntrypoint] = []
+        for hop in hops:
+            syn = hop.synthetic_entrypoint
+            key = (syn.file, syn.line)
+            if key in visited:
+                continue
+            visited.add(key)
+            next_frontier.append(syn)
+            if depth >= 2:
+                entrypoints[key] = McpEntrypoint(
+                    syn.file, syn.function_name, syn.line, syn.parameter_names, "transitive_cross_file_hop", "medium"
+                )
+        if not next_frontier:
+            return
+        frontier = next_frontier
 
 
 # --------------------------------------------------------------------------

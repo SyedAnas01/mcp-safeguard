@@ -32,7 +32,7 @@ mcp-safeguard scan your-config.json
 **CI (drop-in GitHub Action):**
 
 ```yaml
-- uses: SyedAnas01/mcp-safeguard@v0.10.2
+- uses: SyedAnas01/mcp-safeguard@v0.11.0
   with:
     mode: scan-source   # or: scan
     path: .
@@ -40,7 +40,7 @@ mcp-safeguard scan your-config.json
     format: sarif
 ```
 
-**pre-commit:** `rev: v0.10.2` · **Homebrew:** `brew tap SyedAnas01/mcp-safeguard && brew install mcp-safeguard`
+**pre-commit:** `rev: v0.11.0` · **Homebrew:** `brew tap SyedAnas01/mcp-safeguard && brew install mcp-safeguard`
 
 </div>
 
@@ -315,7 +315,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: SyedAnas01/mcp-safeguard@v0.10.2
+      - uses: SyedAnas01/mcp-safeguard@v0.11.0
         with:
           mode: scan-source          # or: scan (config JSON)
           path: .                    # or: mcp.json / claude_desktop_config.json
@@ -335,7 +335,7 @@ Every commit that touches an MCP config pulls PyPI via the hook:
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/SyedAnas01/mcp-safeguard
-    rev: v0.10.2
+    rev: v0.11.0
     hooks:
       - id: mcp-safeguard
 ```
@@ -454,7 +454,7 @@ Detection rules across seven categories: prompt injection, credentials, tool poi
 | Tool Poisoning | 11 patterns (TP-001–011) | Side-effect exfil, external calls, safety overrides, hidden instruction tags, conceal-from-user directives, read-then-exfiltrate patterns |
 | SSRF Detection | 3 rules (SS-001–003) | URL params without allowlist/blocklist protection, blind URL fetch descriptors, redirect-following without revalidation |
 | OAuth Scope Risk | 7 rules (OAUTH-001–007) | Overly-broad/write/delete/sudo/offline_access/PII-exposing OAuth scopes |
-| Source Audit | 36 rules (SRC-001–036) | Credential re-applied across a cross-host redirect, read-only enforced by string check alone, credential attached to a caller-influenced host, unenforced auth flags, unowned resource IDs keying shared state, syntax-only destructive-query classifiers, client-trusted ownership fields, unescaped shell interpolation, unhardened credential file writes, SSRF TOCTOU, silently-dropped manifest entries, disabled TLS verification, unchecked OAuth redirect_uri before a redirect, inbound-token passthrough to an outbound request, a write-capability flag that gates tool listing but not tool execution, a header value used as an authorization identity with no authentication check, real path traversal via a joined-path containment check (including a runtime-selected/argparse-style transport value and Node's Sync-suffixed file APIs), broader (no-repo-signal-required) shell injection, unencoded URL query-string building, a network listener with no inbound authentication check anywhere in the file (verified against a real, still-live unauthenticated deployment covering 115 servers in one repo — the single most common real bug shape this campaign found), SQL/SoQL injection, unguarded outbound SSRF, missing resource-scope checks (BOLA), reflected XSS, loopback/Origin DNS-rebinding, OAuth scope without a role check, unredacted error/PII logging, plaintext credential persistence, CORS wildcard/disabled dev-server host checks, a credential passed as a URL query parameter on a GET request instead of a POST body, a session id from a client header reused with no ownership check (session hijacking), a caller-controlled simulate/dry-run flag as the sole gate before a signing/broadcast call, a state-changing FastAPI/Flask route with no authentication dependency anywhere in the file, a secret-shaped constant that falls back to a hardcoded non-empty string when its env var is unset, and the MCP SDK's own DNS-rebinding protection explicitly disabled. Scans the server's source tree, not a config file — see `scan-source` above |
+| Source Audit | 46 rules (SRC-001–046) | Credential re-applied across a cross-host redirect, read-only enforced by string check alone, credential attached to a caller-influenced host, unenforced auth flags, unowned resource IDs keying shared state, syntax-only destructive-query classifiers, client-trusted ownership fields, unescaped shell interpolation, unhardened credential file writes, SSRF TOCTOU, silently-dropped manifest entries, disabled TLS verification, unchecked OAuth redirect_uri before a redirect, inbound-token passthrough to an outbound request, a write-capability flag that gates tool listing but not tool execution, a header value used as an authorization identity with no authentication check, real path traversal via a joined-path containment check (including a runtime-selected/argparse-style transport value and Node's Sync-suffixed file APIs), broader (no-repo-signal-required) shell injection, unencoded URL query-string building, a network listener with no inbound authentication check anywhere in the file (verified against a real, still-live unauthenticated deployment covering 115 servers in one repo — the single most common real bug shape this campaign found), SQL/SoQL injection, unguarded outbound SSRF, missing resource-scope checks (BOLA), reflected XSS, loopback/Origin DNS-rebinding, OAuth scope without a role check, unredacted error/PII logging, plaintext credential persistence, CORS wildcard/disabled dev-server host checks, a credential passed as a URL query parameter on a GET request instead of a POST body, a session id from a client header reused with no ownership check (session hijacking), a caller-controlled simulate/dry-run flag as the sole gate before a signing/broadcast call, a state-changing FastAPI/Flask route with no authentication dependency anywhere in the file, a secret-shaped constant that falls back to a hardcoded non-empty string when its env var is unset, the MCP SDK's own DNS-rebinding protection explicitly disabled, dynamic code evaluation of a non-literal, caller-controlled argv elements passed to flag-sensitive binaries, security checks enforced only outside a local/dev mode, hardcoded default admin credentials, an OAuth proxy with no per-client consent check (confused deputy), an inbound bearer token reused upstream with no audience check, and (experimental) handle-ownership, tool-description rug-pull, MRTR requestState and public cacheScope hazards from the 2026-07-28 MCP spec. Also flags unguarded fetches of client-supplied auth metadata/JWKS URLs (SS-004). Scans the server's source tree, not a config file — see `scan-source` above |
 
 ### Benchmarked against real, confirmed vulnerabilities — not just unit tests
 

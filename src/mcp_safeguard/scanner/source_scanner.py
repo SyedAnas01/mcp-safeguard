@@ -259,6 +259,16 @@ RULE_IDS: list[tuple[str, str]] = [
     ("SRC-034", "State-changing FastAPI/Flask route with no authentication dependency anywhere in the file"),
     ("SRC-035", "Secret-shaped constant falls back to a hardcoded non-empty string when its env var is unset"),
     ("SRC-036", "MCP SDK's DNS-rebinding protection explicitly disabled"),
+    ("SRC-037", "Dynamic code evaluation (eval/Function/vm/parse_expr) of a non-literal value"),
+    ("SRC-038", "Caller-controlled argv element passed to a flag-sensitive binary without a `--` separator"),
+    ("SRC-039", "Security check only enforced when a local/single-user/dev mode predicate is false"),
+    ("SRC-040", "Default administrator credentials hardcoded in source"),
+    ("SRC-041", "Inbound bearer token reused on an outbound call with no audience validation"),
+    ("SRC-042", "[experimental] Server-minted handle keys state with no caller ownership binding"),
+    ("SRC-043", "[experimental] Tool description/schema overwritten on refresh with no pinning or re-approval"),
+    ("SRC-044", "[experimental] requestState read with no integrity verification (HMAC/AEAD/verify)"),
+    ("SRC-045", "[experimental] cacheScope public with ttl>0 in a file that reads per-user/auth context"),
+    ("SRC-046", "OAuth proxy forwards to upstream authorize with static client_id + DCR and no per-client consent check"),
 ]
 
 
@@ -610,7 +620,7 @@ _AUTH_CHECK_PRESENT = re.compile(
 # loosening).
 _PATH_JOIN_WITH_ARG_INLINE = re.compile(
     r"(?:os\.path\.join\(|path\.join\(|Path\([^)\n]*\)\s*/\s*)"
-    r"(?:[^()\n]|\([^()\n]*\)){0,80}\b(?:args|params|kwargs|request|req)\b",
+    r"(?:[^()\n]|\([^()\n]*\)){0,80}(?<![\"'/.\w-])(?:(?:args|params|kwargs|request|req)\b|(?:arguments|tool_input|input)(?=\s*[.\[]))",
     re.IGNORECASE,
 )
 _ARG_DERIVED_ASSIGN = re.compile(
@@ -1491,6 +1501,272 @@ def _is_suppressed(lines: list[str], line_no: int, rule_id: str) -> bool:
     return "*" in ids or rule_id.upper() in ids
 
 
+# --- v27: generic shell-sink finder for SRC-019 ---------------------------
+# Mechanism fixes over the v26 single-regex check: (1) every sink in a file is
+# examined, not only the first; (2) the sink vocabulary covers the usual Node
+# (execSync/execAsync/promisified exec, spawn/execFile with shell:true,
+# shelljs), Python (os.system/popen, subprocess.* with shell=True, asyncio
+# create_subprocess_shell) and Go (exec.Command("sh","-c",...)) spellings;
+# (3) the command argument may be built inline OR assigned one hop earlier
+# from a template/concat/format expression.
+_V27_SINK = re.compile(
+    r"(?:\b(?:child_process|childProcess|cp|shell|shelljs|sh)\.exec(?:Sync|Async|Promise)?\(|"
+    r"(?<![\w.])exec(?:Sync|Async|Promise|P)?\s*\(|\.exec(?:Sync|Async)\s*\(|\bpromisify\(\s*exec\s*\)\s*\(|"
+    r"\bos\.(?:system|popen)\(|\basyncio\.create_subprocess_shell\(|"
+    r"\bsubprocess\.(?:run|call|Popen|check_output|check_call|getoutput|getstatusoutput)\(|"
+    r"\b(?:spawn|spawnSync|execFile|execFileSync|execa|execaSync)\(|"
+    r"\bexec\.Command(?:Context)?\()"
+)
+_V27_NEEDS_SHELL_FLAG = re.compile(r"subprocess\.(?!getoutput|getstatusoutput)|(?<![\w.])(?:spawn|spawnSync|execFile|execFileSync|execa|execaSync)\(")
+_V27_SHELL_FLAG = re.compile(r"shell\s*[:=]\s*(?:True|true|[\"'/][^,)}\s]*)|-c[\"']|/c[\"']|\bbash\b|\bsh\b")
+_V27_DYNAMIC = re.compile(
+    r"\$\{[^}]+\}|\bf[\"'][^\"'\n]*\{[^}]+\}|[\"'`]\s*\+\s*[A-Za-z_(]|[A-Za-z_)\]]\s*\+\s*[\"'`]|"
+    r"\.format\(|[\"']\s*%\s*[(\w]|\.join\(|\bf[\"']|\bfmt\.Sprintf\(|\bstrings\.Join\("
+)
+_V27_ESCAPE = re.compile(r"shlex\.(?:quote|join)\(|shellQuote\(|escapeShellArg\(|shell-quote|shellescape|quote\(")
+_V27_LEADING_IDENT = re.compile(r"\(\s*(?:await\s+)?([A-Za-z_]\w*)\s*[,)]")
+
+
+def _v27_call_args(text: str, open_idx: int, limit: int = 600) -> str:
+    depth, i, end = 0, open_idx, min(len(text), open_idx + limit)
+    while i < end:
+        c = text[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                return text[open_idx:i + 1]
+        i += 1
+    return text[open_idx:end]
+
+
+def _v27_split_top_args(args: str) -> list[str]:
+    inner = args[1:-1] if args[:1] == "(" and args[-1:] == ")" else args[1:]
+    parts, depth, cur, quote = [], 0, [], ""
+    for c in inner:
+        if quote:
+            cur.append(c)
+            if c == quote:
+                quote = ""
+            continue
+        if c in "\"'`":
+            quote = c
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+            continue
+        cur.append(c)
+    parts.append("".join(cur))
+    return parts
+
+
+def _find_shell_injection_sites(text: str, suffix: str = "", max_sites: int = 20, require_import: bool = False) -> list[tuple[int, str]]:
+    sites: list[tuple[int, str]] = []
+    for m in _V27_SINK.finditer(text):
+        head = m.group(0)
+        if suffix == ".py" and re.match(r"exec\w*\s*\(", head):
+            continue  # Python builtin exec() is code evaluation (SRC-037), not a shell sink
+        if require_import and re.match(r"exec\s*\(", head) and not (
+            _CHILD_PROCESS_IMPORT.search(text) and not _LOCAL_EXEC_DEF.search(text)
+        ):
+            continue  # bare exec() is a shell call only when imported from child_process
+        open_idx = m.end() - 1
+        args = _v27_call_args(text, open_idx)
+        is_go = head.startswith("exec.Command")
+        if _V27_NEEDS_SHELL_FLAG.search(head) or is_go:
+            if not _V27_SHELL_FLAG.search(args):
+                continue
+        if _V27_ESCAPE.search(args):
+            continue
+        parts = _v27_split_top_args(args)
+        cmd_arg = parts[-1] if is_go else parts[0]
+        dynamic = bool(_V27_DYNAMIC.search(cmd_arg))
+        if not dynamic:
+            im = re.match(r"\s*(?:await\s+)?([A-Za-z_]\w*)\s*$", cmd_arg)
+            if im:
+                var = re.escape(im.group(1))
+                prior = text[max(0, m.start() - 1500):m.start()]
+                am = None
+                for am in re.finditer(rf"\b{var}\s*(?::\s*\w*\s*)?(\+?)=\s*([^\n;]*(?:\n[^\n;=]{{0,200}}){{0,3}})", prior):
+                    if am.group(1):  # `+=` appends a (presumably non-literal) piece
+                        break
+                if am and (am.group(1) or _V27_DYNAMIC.search(am.group(2))) and not _V27_ESCAPE.search(am.group(2)):
+                    dynamic = True
+        if dynamic:
+            sites.append((m.start(), text[m.start():m.start() + 90].strip()))
+            if len(sites) >= max_sites:
+                break
+    if not sites:
+        broad = _broad_shell_injection_site(text)  # caller-supplied parameter run through a shell
+        if broad:
+            sites.append((broad[0], broad[1][:90].strip()))
+    return sites
+
+
+# --- v28: SRC-039 enforcement gated on a deployment-mode flag ---------------
+# A security check (allowlist/verify/auth) that is only enforced when a
+# "local"/"single-user"/"dev" predicate is false silently disables the check
+# for that mode. The mode is deployer-chosen, but the code drops the guard.
+_V28_MODE = r"(?:local|single_?user|dev|debug|test|offline|standalone)"
+_V28_SEC = r"(?:allowlist|whitelist|allowed|verify|authoriz|authent|permission|sandbox|trusted)"
+_V28_GATE = re.compile(
+    r"(?:\b\w*enforce\w*\s*=\s*not\s+\w*" + _V28_MODE + r"\w*\s*\(|"
+    r"\bif\s+not\s+\w*" + _V28_MODE + r"\w*\s*\(\s*\)\s*:|"
+    r"\bif\s*\(\s*!\s*\w*" + _V28_MODE + r"\w*\s*\(\s*\)\s*\))",
+    re.IGNORECASE,
+)
+
+
+def _find_mode_gated_enforcement(text: str, max_sites: int = 10) -> list[tuple[int, str]]:
+    sites: list[tuple[int, str]] = []
+    lines = text.splitlines()
+    for m in _V28_GATE.finditer(text):
+        ln = text.count("\n", 0, m.start())
+        window = "\n".join(lines[max(0, ln - 1): ln + 6])
+        if re.search(_V28_SEC, window, re.IGNORECASE):
+            sites.append((m.start(), m.group(0)))
+            if len(sites) >= max_sites:
+                break
+    return sites
+
+
+# --- v28: SRC-040 default administrator credentials -------------------------
+_V28_DEFAULT_ADMIN = re.compile(
+    r"(?:\bcreate_superuser\([^)]*password\s*=\s*[\"'][^\"']{3,}[\"']|"
+    r"\b(?:DEFAULT_ADMIN_(?:PASSWORD|PASS|PWD)|ADMIN_DEFAULT_PASSWORD|DEFAULT_PASSWORD)\s*[:=]\s*[\"'][^\"'\s]{3,}[\"']|"
+    r"\bpassword\s*=\s*[\"'](?:admin|password|changeme|123456|admin123|root)[\"']\s*[,)\n])"
+)
+
+
+_V28_TEST_PATH = re.compile(
+    r"(?:^|/)(?:tests?|__tests__|spec|fixtures?|examples?)/|(?:^|/)test_|_test\.|\.test\.|\.spec\.|(?:^|/)tests\.py$"
+)
+
+
+def _find_default_admin_credentials(text: str, max_sites: int = 5) -> list[tuple[int, str]]:
+    sites: list[tuple[int, str]] = []
+    for m in _V28_DEFAULT_ADMIN.finditer(text):
+        sites.append((m.start(), m.group(0)[:90]))
+        if len(sites) >= max_sites:
+            break
+    return sites
+
+
+# --- v27: SRC-038 argument injection into flag-sensitive binaries ------------
+# argv-style exec (no shell) removes shell metacharacter injection but not
+# *option* injection: a caller-controlled element that starts with "-" is parsed
+# as a flag by git/ssh/curl/tar/npm/... (CWE-88). Fires only when the binary is
+# a literal from a flag-sensitive set, an argv element is non-literal, and no
+# "--" end-of-options marker precedes it.
+_V27_FLAG_BINS = r"git|ssh|scp|nmap|adb|npm|pnpm|yarn|npx|tar|curl|wget|rsync|docker|kubectl|ffmpeg|convert|7z|unzip|zip"
+_V27_ARGV_SINK = re.compile(
+    r"(?:\b(?:spawn|spawnSync|execFile|execFileSync|execa|execaSync)\(\s*[\"'`](?:" + _V27_FLAG_BINS + r")(?:\.exe)?[\"'`]\s*,\s*\[|"
+    r"\bsubprocess\.(?:run|call|Popen|check_output|check_call)\(\s*\[\s*[\"'](?:" + _V27_FLAG_BINS + r")[\"']\s*,|"
+    r"\bexec\.Command(?:Context)?\(\s*(?:\w+\s*,\s*)?\"(?:" + _V27_FLAG_BINS + r")\"\s*,)"
+)
+_V27_ARGV_LITERAL = re.compile(r"^\s*(?:[\"'`][^\"'`$\n{}]*[\"'`]|-?\d+(?:\.\d+)?|true|false|null|None|True|False)\s*$")
+_V27_ARGV_END = re.compile(r"[\"'`]--[\"'`]")
+
+
+def _find_argv_injection_sites(text: str, max_sites: int = 20) -> list[tuple[int, str]]:
+    sites: list[tuple[int, str]] = []
+    for m in _V27_ARGV_SINK.finditer(text):
+        tail = m.group(0)
+        if tail.rstrip().endswith("["):
+            open_idx = m.end() - 1  # the '[' of the argv array
+            args = _v27_call_args(text, open_idx)
+            elems = _v27_split_top_args("(" + args[1:-1] + ")")
+        elif "subprocess." in tail:
+            open_idx = text.index("[", m.start())
+            args = _v27_call_args(text, open_idx)
+            elems = _v27_split_top_args("(" + args[1:-1] + ")")[1:]  # drop the binary literal
+        else:  # Go: remaining call arguments after the binary
+            open_idx = text.index("(", m.start())
+            args = _v27_call_args(text, open_idx)
+            elems = _v27_split_top_args(args)
+            elems = elems[elems.index(next(e for e in elems if re.search(r'"(?:' + _V27_FLAG_BINS + r')"', e))) + 1:]
+        if _V27_ARGV_END.search(args):
+            continue
+        if _V27_ESCAPE.search(args):
+            continue
+        if any(not _V27_ARGV_LITERAL.match(e) for e in elems if e.strip()):
+            sites.append((m.start(), text[m.start():m.start() + 90].strip()))
+            if len(sites) >= max_sites:
+                break
+    return sites
+
+
+# --- v27: SRC-037 dynamic code evaluation of a non-literal -----------------
+# Generic CWE-94/95 sink list (language built-ins and the commonly misused
+# expression parsers); fires only when the argument is not a plain literal.
+_V27_EVAL_SINK = re.compile(
+    r"(?<![\w.])eval\s*\(|\b(?:window|globalThis|global|self|builtins)\.eval\s*\(|\(0,\s*eval\)\(|\bnew\s+Function\(|(?<![\w.])Function\(|\bvm\.(?:runIn\w+|Script)\(|\bnew\s+vm\.Script\(|"
+    r"\bsympify\(|\bparse_expr\(|\bsympy\.parsing\.\w+\.parse_expr\(|\bpickle\.loads?\(|"
+    r"(?<![\w.])exec\s*\("
+)
+_V27_EVAL_LITERAL_ARG = re.compile(r"\(\s*(?:r?[\"'][^\"'$\{\n]*[\"']|\d+|)\s*[,)]")
+
+
+def _find_dynamic_eval_sites(text: str, suffix: str, max_sites: int = 20) -> list[tuple[int, str]]:
+    sites: list[tuple[int, str]] = []
+    for m in _V27_EVAL_SINK.finditer(text):
+        head = m.group(0)
+        if head.startswith("exec(") and suffix != ".py":
+            continue
+        if ("pickle" in head or "sympify" in head or "parse_expr" in head) and suffix != ".py":
+            continue
+        if (head.startswith("eval(") or "Function" in head or "vm." in head) and suffix == ".py" and not head.startswith("eval("):
+            continue
+        args = _v27_call_args(text, text.index("(", m.start()), 300)
+        _bare = re.sub(r"\"[^\"\n$]*\"|'[^'\n$]*'|\b\d+\b", "", args[1:-1] if len(args) > 1 else "")
+        if "${" not in args and not re.search(r"[A-Za-z_$]", _bare):
+            continue  # every argument is a plain literal
+        if re.search(r"ast\.literal_eval|JSON\.parse", text[max(0, m.start() - 12):m.start()]):
+            continue
+        sites.append((m.start(), text[m.start():m.start() + 90].strip()))
+        if len(sites) >= max_sites:
+            break
+    return sites
+
+
+
+def _spec_detectors():
+    """Per-file detector callables (rel, text, suffix) -> list[SourceFinding]."""
+    from . import (
+        cache_scope_public,
+        mrtr_request_state,
+        oauth_confused_deputy,
+        state_handle_ownership,
+        token_passthrough,
+        tool_description_mutation,
+    )
+    from .ssrf_scanner import scan_source_for_metadata_ssrf
+
+    def _ssrf(rel: str, text: str, suffix: str) -> list[SourceFinding]:
+        return [
+            SourceFinding(
+                "SS-004", f.severity, f.title, f.description, f.location,
+                f.evidence, f.remediation, f.cvss_score,
+            )
+            for f in scan_source_for_metadata_ssrf(text, rel)
+        ]
+
+    return [
+        lambda r, t, s: oauth_confused_deputy.scan_text(r, t),
+        lambda r, t, s: token_passthrough.scan_text(r, t),
+        lambda r, t, s: state_handle_ownership.scan_text(r, t),
+        lambda r, t, s: tool_description_mutation.scan_text(r, t),
+        lambda r, t, s: mrtr_request_state.scan_text(r, t, s),
+        lambda r, t, s: cache_scope_public.scan_text(r, t),
+        _ssrf,
+    ]
+
+
 def scan_source_tree(root: str | Path) -> list[SourceFinding]:
     """Walk a source tree and return heuristic code-level security findings."""
     root = Path(root)
@@ -1943,19 +2219,24 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # SRC-018: path joined with a request/argument-derived value, fed
         # into a file operation, with no containment check in between.
         # Try the inline shape first, then the assign-then-join shape.
-        pjm = _PATH_JOIN_WITH_ARG_INLINE.search(text)
-        src018_window = text[pjm.start():pjm.start() + 400] if pjm else None
-        if pjm is None:
-            for am in _ARG_DERIVED_ASSIGN.finditer(text):
-                var = am.group(1)
-                lookahead = text[am.end():am.end() + 400]
-                jm = _PATH_JOIN_CALL.search(lookahead)
-                if jm and re.search(rf"\b{re.escape(var)}\b", lookahead[jm.start():jm.end() + 120]):
-                    pjm = am  # anchor the reported location at the assignment
-                    src018_window = lookahead[jm.start():jm.end() + 300]
-                    break
-        if pjm and src018_window is not None:
-            if _FILE_OPEN_CALL.search(src018_window) and not _PATH_CONTAINMENT_CHECK.search(src018_window):
+        # v27: examine every candidate (inline-join shape, then assign-then-join
+        # shape), not only the first file-wide match; report each with no
+        # containment check in its own window.
+        _src018_hits: list[tuple[int, str]] = []
+        for pjm_i in _PATH_JOIN_WITH_ARG_INLINE.finditer(text):
+            w = text[max(0, pjm_i.start() - 60):pjm_i.start() + 400]  # sink may wrap the join call
+            if _FILE_OPEN_CALL.search(w) and not _PATH_CONTAINMENT_CHECK.search(w):
+                _src018_hits.append((pjm_i.start(), w))
+        for am in _ARG_DERIVED_ASSIGN.finditer(text):
+            var = am.group(1)
+            lookahead = text[am.end():am.end() + 400]
+            jm = _PATH_JOIN_CALL.search(lookahead)
+            if jm and re.search(rf"\b{re.escape(var)}\b", lookahead[jm.start():jm.end() + 120]):
+                w = lookahead[jm.start():jm.end() + 300]
+                if _FILE_OPEN_CALL.search(w) and not _PATH_CONTAINMENT_CHECK.search(w):
+                    _src018_hits.append((am.start(), w))
+        for _off, _w in sorted(set(_src018_hits))[:20]:
+            if True:
                 file_findings.append(SourceFinding(
                     "SRC-018", Severity.HIGH,
                     "Path traversal: joined path used with no containment check",
@@ -1969,8 +2250,8 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                     "real path and checking it stays under the base "
                     "directory does. A value like '../../etc/passwd' or an "
                     "absolute path can escape the intended directory.",
-                    f"{rel}:{_line_of(text, pjm.start())}",
-                    text[pjm.start():pjm.start() + 90].strip(),
+                    f"{rel}:{_line_of(text, _off)}",
+                    text[_off:_off + 90].strip(),
                     "After joining, resolve the real path (os.path.realpath/"
                     "Path.resolve()) and verify it is still relative to the "
                     "base directory (Path.is_relative_to() or a commonpath "
@@ -1980,14 +2261,14 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
 
         # SRC-019: unescaped shell interpolation -- broader companion to
         # SRC-009, no repo-wide corroboration required (see module docstring).
-        site2 = _broad_shell_injection_site(text)
-        if site2:
-            sm2_start, window2 = site2
+        for _site_off, _site_snip in _find_shell_injection_sites(text, path.suffix, require_import=True):
             file_findings.append(SourceFinding(
                 "SRC-019", Severity.MEDIUM,
                 "Unescaped interpolation into a shell command (broad check)",
                 "A variable is interpolated into a shell command string "
-                "passed to exec/system, with no escaping helper "
+                "passed to exec/system (or to a spawn/subprocess/Command "
+                "call run through a shell), inline or via a command string "
+                "built one assignment earlier, with no escaping helper "
                 "(shlex.quote/shellQuote/escapeShellArg) applied at this "
                 "call site. Unlike SRC-009, this fires without requiring "
                 "evidence the repo already knows the risk elsewhere -- "
@@ -1995,14 +2276,82 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
                 "even more than the other source-audit rules: check "
                 "whether the interpolated value can ever be influenced "
                 "by a tool caller (directly or via prompt injection).",
-                f"{rel}:{_line_of(text, sm2_start)}",
-                window2[:90].strip(),
+                f"{rel}:{_line_of(text, _site_off)}",
+                _site_snip,
                 "Use an argv-array exec (execFile/spawn with an args "
                 "list, or subprocess.run([...], shell=False)) or quote "
                 "the interpolated value with shlex.quote/shellQuote "
                 "before building the shell string.",
                 7.0,
             ))
+
+        for _moff, _msnip in _find_mode_gated_enforcement(text):
+            file_findings.append(SourceFinding(
+                "SRC-039", Severity.MEDIUM,
+                "Security check enforced only outside a local/single-user/dev mode",
+                "An allowlist/verification/auth step is gated on a deployment-mode "
+                "predicate (local, single-user, dev, ...), so the check is silently "
+                "skipped in that mode. If that mode can be reached by a remote caller "
+                "(a documented flag, a default, a container or CI setup), the guard "
+                "does not apply. Treat as a lead: confirm how the mode is selected.",
+                f"{rel}:{_line_of(text, _moff)}",
+                _msnip,
+                "Enforce the check in every mode, or fail closed when the mode "
+                "predicate cannot be established as truly local.",
+                5.5,
+            ))
+
+        for _doff, _dsnip in ([] if _V28_TEST_PATH.search(rel) else _find_default_admin_credentials(text)):
+            file_findings.append(SourceFinding(
+                "SRC-040", Severity.MEDIUM,
+                "Default administrator credentials hardcoded in source",
+                "A fixed administrator password is created or defaulted in code. "
+                "Anyone who knows the project's defaults can authenticate as admin "
+                "on an instance whose operator did not change them.",
+                f"{rel}:{_line_of(text, _doff)}",
+                _dsnip,
+                "Generate a random password at first start or refuse to start "
+                "until one is configured.",
+                6.0,
+            ))
+
+        for _aoff, _asnip in _find_argv_injection_sites(text):
+            file_findings.append(SourceFinding(
+                "SRC-038", Severity.MEDIUM,
+                "Caller-controlled argv element passed to a flag-sensitive binary without `--`",
+                "An argv-style exec (no shell) runs a binary that parses leading "
+                "'-' arguments as options (git, ssh, curl, tar, npm, ...), and at "
+                "least one argv element is not a literal while no '--' end-of-options "
+                "marker precedes it. A caller-supplied value beginning with '-' is "
+                "then read as an option (CWE-88), e.g. git --upload-pack=<cmd>. "
+                "Treat as a lead: confirm the element is attacker-reachable.",
+                f"{rel}:{_line_of(text, _aoff)}",
+                _asnip,
+                "Insert '--' before caller-supplied positional arguments, reject "
+                "values starting with '-', and validate against an allowlist.",
+                6.0,
+            ))
+
+        if path.suffix in (".py", ".js", ".ts", ".mjs", ".cjs", ".tsx", ".jsx"):
+            for _eoff, _esnip in _find_dynamic_eval_sites(text, path.suffix):
+                file_findings.append(SourceFinding(
+                    "SRC-037", Severity.MEDIUM,
+                    "Dynamic code evaluation (eval/Function/vm/parse_expr) of a non-literal value",
+                    "A non-literal value is passed to a code-evaluation sink "
+                    "(eval, new Function, vm.run*, exec, sympy parse_expr/"
+                    "sympify, pickle.load). If any part of that value can be "
+                    "influenced by a tool caller, this is arbitrary code "
+                    "execution (CWE-94/95). Treat as a lead: confirm whether "
+                    "the value is attacker-reachable and whether a strict "
+                    "grammar/allowlist precedes it.",
+                    f"{rel}:{_line_of(text, _eoff)}",
+                    _esnip,
+                    "Replace with a purpose-built parser or a fixed-grammar "
+                    "evaluator (ast.literal_eval, JSON.parse, a math-expression "
+                    "library with no attribute access); never evaluate raw "
+                    "caller text.",
+                    6.5,
+                ))
 
         # SRC-020: unencoded value built directly into a URL query string --
         # the statically-checkable root cause behind HTTP Parameter Pollution
@@ -3001,6 +3350,14 @@ def scan_source_tree(root: str | Path) -> list[SourceFinding]:
         # it would otherwise be blanked out right along with every other
         # one before this check ever saw it.
         source_lines = raw_text.splitlines()
+        # v0.11: MCP-spec class detectors (confused deputy SRC-046, token
+        # passthrough SRC-041, state-handle ownership SRC-042, tool-description
+        # mutation SRC-043, MRTR requestState SRC-044, public cacheScope SRC-045)
+        # and SS-004 (unguarded fetch of client-supplied auth metadata). Imported
+        # lazily: these modules import SourceFinding from this one.
+        for _det in _spec_detectors():
+            file_findings.extend(_det(rel, text, path.suffix))
+
         for ff in file_findings:
             line_str = ff.location.rsplit(":", 1)[-1]
             line_no = int(line_str) if line_str.isdigit() else 0
