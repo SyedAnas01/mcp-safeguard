@@ -1237,10 +1237,12 @@ def test_residue_test_tool_schema_requires_impact_basis_but_base_schema_is_untou
     assert "impact_basis" not in _ADVERSARY_TOOL_SCHEMA["input_schema"]["properties"]
     # The base schema's own verdict/severity/cwe/reasoning definitions are
     # reused by reference, not retyped -- no drift between the two schemas.
-    for key in ("verdict", "severity", "cwe", "reasoning"):
+    # WS5: "verdict" now comes from _ADVERSARY_TOOL_SCHEMA_V2 (adds confirmed-conditional).
+    for key in ("severity", "cwe", "reasoning"):
         assert _RESIDUE_TEST_TOOL_SCHEMA["input_schema"]["properties"][key] is (
             _ADVERSARY_TOOL_SCHEMA["input_schema"]["properties"][key]
         )
+    assert "confirmed-conditional" in _RESIDUE_TEST_TOOL_SCHEMA["input_schema"]["properties"]["verdict"]["enum"]
 
 
 def test_adversary_result_impact_basis_defaults_to_none_for_every_other_backend():

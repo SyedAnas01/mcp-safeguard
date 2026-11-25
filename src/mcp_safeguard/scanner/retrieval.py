@@ -213,6 +213,63 @@ def _mechanism_buckets(tokens: set[str]) -> set[str]:
 
 
 # --------------------------------------------------------------------------
+# Mechanism taxonomy (WS9, v26) -- the re-index of the exemplar bank by
+# vulnerability MECHANISM. Derived at index/query time from text, so no
+# ClaimCard/ledger schema change and every pre-existing entry is re-indexed
+# for free. An entry/query is assigned a mechanism when (a) its text carries
+# an explicit `mechanism: <slug>` marker (used by the WS9 seed exemplars), or
+# (b) at least `_MECHANISM_MIN_HITS` DISTINCT signature patterns for that
+# mechanism match its lowercased text. Signatures are deliberately specific
+# (two weak generic words never qualify) because a mechanism match adds a
+# larger score bonus than the coarse buckets above.
+# --------------------------------------------------------------------------
+
+_MECHANISM_MIN_HITS = 2
+
+_MECHANISM_SIGNATURES: dict[str, tuple[re.Pattern[str], ...]] = {
+    slug: tuple(re.compile(p) for p in pats)
+    for slug, pats in {
+        "sql-guard-bypass": (r"\bsql\b", r"read-?only", r"\bast\b|outermost|statement[- ]type|stmt", r"explain|select\b.*\binto\b|writable cte|validate_?read"),
+        "path-traversal": (r"path traversal|\.\./|directory traversal", r"symlink|realpath|resolve", r"arbitrary file (read|write)|cwe-22\b"),
+        "command-injection": (r"command injection|\bcmdi\b|cwe-78\b|cwe-77\b", r"subprocess|shell\s*=\s*true|\bexec\(|child_process|os\.system"),
+        "idor-authorization": (r"\bidor\b|\bbola\b|cwe-639\b|cwe-862\b|cwe-863\b", r"tenant|cross-(project|tenant|user)|other (users|clients)|unscoped|org(anization)? scope"),
+        "ssrf": (r"\bssrf\b|server-side request forgery|cwe-918\b", r"allow-?list|private (ip|address)|internal network|169\.254|link-local|loopback|dns rebinding|redirect"),
+        "metadata-fetch-ssrf": (
+            r"client[ _-]?id[ _-]?metadata|\bcimd\b|client metadata document|metadata document",
+            r"(client_?id|issuer|resource_?metadata|jwks_?uri|logo_?uri|well-known|discovery)[^.\n]{0,60}(url|fetch|http)|fetch[^.\n]{0,60}(metadata|discovery|jwks|well-known)",
+            r"\bssrf\b|private (ip|address)|internal|169\.254|link-local|unvalidated url",
+        ),
+        "confused-deputy": (r"confused[- ]deputy|cwe-441\b", r"static (upstream )?client[ _-]?id|upstream (authorize|client|idp|authorization)", r"\bdcr\b|dynamic (client )?registration|/register", r"consent|approved[ _-]clients?"),
+        "token-passthrough": (r"token[- ]passthrough|pass-?through", r"audience|\baud\b|issued for|shared audience", r"inbound|forward(s|ed)? (the )?(client |user )?(bearer |access )?token|authorization header", r"introspect|jwt\.decode|verify|replay"),
+        "state-handle-ownership": (r"(state|session|task|conversation|resource)[ _-]?(handle|id)s?\b|opaque handle", r"owner(ship)?|principal|caller (identity|binding)|user_?id", r"hijack|session binding|replay|other (users|clients)'? (state|tasks|sessions)|cancel"),
+        "rug-pull": (r"rug[- ]?pull|tool[- ]description (mutation|change|poison)|description[^.\n]{0,40}(overwrit|mutat|change|refresh)", r"re-?approv|pin(ned|ning)?\b|sha-?256|digest|hash", r"refresh|sync|upstream|list_tools|tools/list"),
+        "request-state-integrity": (r"request_?state|mrtr|input_required", r"hmac|aead|integrity|tamper|seal|signature|verify", r"client-held state|attacker-controlled|forg(e|ed|ery)"),
+        "cache-scope": (r"cache_?scope|shared cache|cache[- ](confusion|poisoning|key)", r"\bpublic\b|\bprivate\b|ttl_?(ms)?\b|max-age", r"per-?user|auth(entication)? context|user_?id|canonicali[sz]"),
+    }.items()
+}
+
+_MECHANISM_TAG_RE = re.compile(r"mechanism:\s*([a-z0-9-]+)")
+
+# Cap on the summed mechanism bonus so a long hunter query that touches many
+# mechanisms cannot swamp the lexical similarity.
+_MECHANISM_BONUS = 0.10
+_MECHANISM_BONUS_CAP = 0.20
+
+
+def classify_mechanisms(text: str) -> frozenset[str]:
+    """Mechanism slugs for a ClaimCard text or a retrieval query. See the
+    taxonomy comment above for the (explicit tag | >= N distinct signature
+    hits) rule. Pure and deterministic."""
+    low = text.lower()
+    found = {m for m in _MECHANISM_TAG_RE.findall(low) if m in _MECHANISM_SIGNATURES}
+    for slug, patterns in _MECHANISM_SIGNATURES.items():
+        hits = sum(1 for p in patterns if p.search(low))
+        if hits >= min(_MECHANISM_MIN_HITS, len(patterns)):
+            found.add(slug)
+    return frozenset(found)
+
+
+# --------------------------------------------------------------------------
 # Public result shapes
 # --------------------------------------------------------------------------
 
@@ -257,6 +314,11 @@ class ExemplarIndex:
     entries: list[LedgerEntry]
     doc_tokens: list[list[str]]
     include_unconfirmed: bool
+    doc_mechanisms: list[frozenset[str]] | None = None
+
+    def __post_init__(self) -> None:
+        if self.doc_mechanisms is None:
+            self.doc_mechanisms = [classify_mechanisms(_claim_text(e.claim_card, e.notes)) for e in self.entries]
 
     def add_entry(self, entry: LedgerEntry) -> None:
         """Incrementally extend this index with ONE newly-written ledger
@@ -274,6 +336,8 @@ class ExemplarIndex:
             return
         self.entries.append(entry)
         self.doc_tokens.append(_tokenize(_claim_text(entry.claim_card, entry.notes)))
+        assert self.doc_mechanisms is not None
+        self.doc_mechanisms.append(classify_mechanisms(_claim_text(entry.claim_card, entry.notes)))
 
 
 def build_exemplar_index(
@@ -355,16 +419,19 @@ def retrieve_exemplars(
                 "for each include_unconfirmed setting a caller actually uses."
             )
         entries, doc_tokens = index.entries, index.doc_tokens
+        doc_mechs = index.doc_mechanisms or []
     else:
         entries = read_entries(ledger_path)
         if not include_unconfirmed:
             entries = [e for e in entries if e.verdict in ("confirmed", "refuted")]
         doc_tokens = [_tokenize(_claim_text(e.claim_card, e.notes)) for e in entries]
+        doc_mechs = [classify_mechanisms(_claim_text(e.claim_card, e.notes)) for e in entries]
 
     if exclude_target_sink is not None:
-        paired = [(e, t) for e, t in zip(entries, doc_tokens, strict=True) if e.claim_card.target_sink != exclude_target_sink]
-        entries = [e for e, _ in paired]
-        doc_tokens = [t for _, t in paired]
+        paired = [(e, t, m) for e, t, m in zip(entries, doc_tokens, doc_mechs, strict=True) if e.claim_card.target_sink != exclude_target_sink]
+        entries = [e for e, _, _ in paired]
+        doc_tokens = [t for _, t, _ in paired]
+        doc_mechs = [m for _, _, m in paired]
 
     if not entries:
         return RetrievalResult(
@@ -386,12 +453,21 @@ def retrieve_exemplars(
     vectors = _tfidf_vectors([*doc_tokens, query_tokens])
     doc_vectors, query_vector = vectors[:-1], vectors[-1]
     query_buckets = _mechanism_buckets(set(query_tokens))
+    query_mechs = classify_mechanisms(mechanism_tag_or_description)
 
     scored: list[tuple[float, LedgerEntry]] = []
-    for entry, vector, tokens in zip(entries, doc_vectors, doc_tokens, strict=True):
+    for entry, vector, tokens, mechs in zip(entries, doc_vectors, doc_tokens, doc_mechs, strict=True):
         cosine = _cosine_similarity(query_vector, vector)
         shared_buckets = query_buckets & _mechanism_buckets(set(tokens))
-        score = min(1.0, cosine + _BUCKET_BONUS * len(shared_buckets))
+        # Trusted tier only: unconfirmed fleet-scan entries are near-duplicate
+        # clusters (same file, same text); a mechanism bonus there just
+        # reshuffles siblings, so they keep pure lexical ranking.
+        mech_bonus = (
+            min(_MECHANISM_BONUS_CAP, _MECHANISM_BONUS * len(query_mechs & mechs))
+            if entry.verdict in ("confirmed", "refuted")
+            else 0.0
+        )
+        score = min(1.0, cosine + _BUCKET_BONUS * len(shared_buckets) + mech_bonus)
         scored.append((score, entry))
 
     scored.sort(key=lambda pair: pair[0], reverse=True)

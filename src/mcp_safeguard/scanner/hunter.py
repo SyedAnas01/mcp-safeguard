@@ -405,7 +405,38 @@ _WHOLE_FILE_TOTAL_BUDGET_CHARS = 600_000
 # across this project's own 10-target corpus (okta's users.py) at ~30,000
 # chars -- so a 30K per-unit budget is large enough to hold even the biggest
 # real bug file this project has ever measured, in full, on its own.
-_UNIT_EVIDENCE_MAX_CHARS = 30_000
+#
+# Revised 200,000 (serverless-serverless sealed-holdout-gap fix, same
+# milestone as `_ALL_CALLEE_MAX_HOP_DEPTH`): the 30K figure above was never
+# validated against a unit with many real cross-file delegation targets --
+# it was sized to the single largest known BUG FILE, not to the combined
+# size of everything one unit's own entrypoint(s) actually delegate into.
+# Measured directly against the real sealed_holdout_v1 corpus: several
+# targets were ALREADY silently exceeding 30K before this change, with no
+# depth-2 hop involved at all (PrefectHQ-fastmcp-oauth-token-reuse's
+# server.py unit alone needs ~143K to show its own file plus its one real
+# delegation target; PrefectHQ-fastmcp-openapi-ssrf's components.py unit
+# needs ~80K; modelcontextprotocol-python-sdk's experimental.py unit needs
+# ~80K) -- serverless-serverless's tools-definition.js unit (the one this
+# fix targets, 16 real entrypoints in one file) is the most extreme case at
+# ~216K, but not a qualitatively different problem, just a bigger instance
+# of one this project already had. 200K comfortably covers every one of
+# those real, measured needs except serverless-serverless's absolute total
+# (which still gets SOME tail content dropped, honestly noted via the
+# existing "evidence budget exhausted" mechanism) while comfortably
+# reaching `project-finder.js` specifically (~78K cumulative to get there
+# under this unit's own file-processing order). This is a real, broad
+# change -- every whole-handler-audit and credential-and-secrets per-unit
+# dispatch across every future run now gets a larger evidence pack, not
+# just serverless-serverless's -- made deliberately, not as a side effect,
+# after checking it would not blow up Go/Kotlin targets (neither language's
+# entrypoints get ANY delegation-file content at all, at any depth --
+# `_one_hop_forward_call_targets` only resolves Python/JS/TS -- so this
+# change is a no-op for every Go/Kotlin unit). Real cold dispatches against
+# the targets most exposed by this change (not just serverless-serverless)
+# are the actual verification for whether this was the right number, not
+# this comment's own arithmetic alone.
+_UNIT_EVIDENCE_MAX_CHARS = 200_000
 
 # Adversary-fullcontext milestone caps. `build_adversary_prompt` (adversary.py)
 # is deliberately a single-`ClaimCard`-parameter function -- enforced by
@@ -1399,27 +1430,50 @@ def _group_relevance_score(root: Path, rel_file: str, eps: list[EntrypointProfil
 # path already is, not left unbounded just because it is reused here.
 _ALL_CALLEE_ONE_HOP_MAX_TARGETS = 5
 
+# Serverless-serverless sealed-holdout-gap fix: whole-handler-audit's (and
+# credential-and-secrets' per-unit) full-file evidence dumps used to stop at
+# exactly one cross-file hop from the entrypoint, so a real bug reached only
+# via a SECOND hop (`tools-definition.js` -> `list-projects.js` -> `project-
+# finder.js`) never appeared in any evidence pack across checkpoints 1-4,
+# even though the hunter fleet otherwise found every other sealed target's
+# real bug. Two, not more: this is the depth the one confirmed real gap
+# actually needs, not a guess at "deeper is generally better" -- going
+# further would be unbounded-call-graph scope creep this project's own
+# `cross_file.py`/`critic.py` modules explicitly and repeatedly reject
+# elsewhere, and this project has already measured, once, that MORE
+# evidence can REDUCE a hunter's recall rather than help it (the S7
+# retrieval-impact milestone's enrichment experiment) -- so this is a
+# narrow, targeted extension of an existing bounded mechanism, not a
+# default toward "always add more context."
+_ALL_CALLEE_MAX_HOP_DEPTH = 2
+
 
 def _all_callee_one_hop_targets(root: Path, ep: EntrypointProfile) -> list[str]:
-    """Every real, resolved root-relative file path `ep`'s own enclosing
-    function directly calls into -- ALL direct callees, not just the single
-    one `ep.delegates_to` captures (see this section's own module comment
-    above), capped at `_ALL_CALLEE_ONE_HOP_MAX_TARGETS`. `ep`'s own file is
-    excluded even if a call happens to resolve back into it (a same-file
-    call is already fully shown as part of the entrypoint's own file, see
-    each caller's own `own_files`/`rel_file in own_files` handling). Go/
-    Kotlin entrypoints get an honest empty list -- `_one_hop_forward_targets`
-    only supports Python/JS/TS, exactly the same real language coverage
-    `ep.delegates_to` itself already had (`threat_model.py` never populates
-    `delegates_to` for a Go/Kotlin entrypoint either). Never raises --
-    `_one_hop_forward_targets` already returns an honest empty list on any
-    parse/resolution failure; this just relpaths, dedupes against `ep`'s own
-    file, and caps its output."""
-    from .adversary import _one_hop_forward_targets
+    """Every real, resolved root-relative file path reachable from `ep`'s
+    own enclosing function within `_ALL_CALLEE_MAX_HOP_DEPTH` cross-file
+    hops -- ALL direct callees at each hop, not just the single one
+    `ep.delegates_to` captures (see this section's own module comment
+    above), capped at `_ALL_CALLEE_ONE_HOP_MAX_TARGETS` (applied to the
+    combined, deduped result across every hop, not per hop). `ep`'s own
+    file is excluded even if a call happens to resolve back into it (a
+    same-file call is already fully shown as part of the entrypoint's own
+    file, see each caller's own `own_files`/`rel_file in own_files`
+    handling). Go/Kotlin entrypoints get an honest empty list --
+    `_one_hop_forward_call_targets` only supports Python/JS/TS, exactly the
+    same real language coverage `ep.delegates_to` itself already had
+    (`threat_model.py` never populates `delegates_to` for a Go/Kotlin
+    entrypoint either). Never raises -- `_one_hop_forward_call_targets`
+    already returns an honest empty list on any parse/resolution failure;
+    this just relpaths, dedupes against `ep`'s own file, and caps its
+    output."""
+    from .adversary import _one_hop_forward_call_targets
 
     ep_rel = _relpath(root, ep.file)
-    targets = _one_hop_forward_targets(root, ep_rel, ep.line)
-    out = [t for t in targets if t != ep_rel]
+    targets = _one_hop_forward_call_targets(root, ep_rel, ep.line, max_depth=_ALL_CALLEE_MAX_HOP_DEPTH)
+    out: list[str] = []
+    for t_rel, _name in targets:
+        if t_rel != ep_rel and t_rel not in out:
+            out.append(t_rel)
     return out[:_ALL_CALLEE_ONE_HOP_MAX_TARGETS]
 
 

@@ -171,3 +171,117 @@ def test_tool_name_keyed_registry_unrelated_key_is_not_an_entrypoint(tmp_path):
         """,
     )
     assert recover_js_entrypoints(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# Transitive (2-hop) cross-file recovery -- serverless-style
+# handler -> dispatcher -> tool handler chain (synthetic fixture).
+# ---------------------------------------------------------------------------
+
+
+def _write_chain(tmp_path):
+    (tmp_path / "src").mkdir()
+    _write(
+        tmp_path / "src" / "tools-definition.js",
+        """
+        import { listProjects } from './list-projects.js';
+
+        export const tools = [
+          {
+            name: 'list-projects',
+            handler: async (args) => {
+              return await listProjects(args.dir);
+            },
+          },
+        ];
+        """,
+    )
+    _write(
+        tmp_path / "src" / "list-projects.js",
+        """
+        import { findProjects } from './project-finder.js';
+
+        export async function listProjects(baseDir) {
+          const found = await findProjects(baseDir);
+          return found.split('\\n');
+        }
+        """,
+    )
+    _write(
+        tmp_path / "src" / "project-finder.js",
+        """
+        import { exec } from 'node:child_process';
+
+        export function findProjects(root) {
+          return new Promise((resolve) => exec(`find ${root} -name serverless.yml`, (e, out) => resolve(out)));
+        }
+
+        export function unrelated(x) {
+          return x + 1;
+        }
+        """,
+    )
+
+
+def test_two_hop_cross_file_callee_is_recovered(tmp_path):
+    """The sink function sits two cross-file hops below the registry
+    handler. Stage 1 must surface it (tainted param mapped through both
+    hops), not stop at the first hop."""
+    _write_chain(tmp_path)
+    eps = recover_js_entrypoints(tmp_path)
+    by_file = {e.file.name: e for e in eps}
+    assert "project-finder.js" in by_file
+    ep = by_file["project-finder.js"]
+    assert ep.function_name == "findProjects"
+    assert ep.parameter_names == ["root"]
+    assert ep.sdk_shape == "transitive_cross_file_hop"
+    assert ep.confidence == "medium"
+    # the unrelated function in the same file is not an entrypoint
+    assert not any(e.function_name == "unrelated" for e in eps)
+
+
+def test_two_hop_untainted_argument_is_not_recovered(tmp_path):
+    _write_chain(tmp_path)
+    _write(
+        tmp_path / "src" / "list-projects.js",
+        """
+        import { findProjects } from './project-finder.js';
+
+        export async function listProjects(baseDir) {
+          return (await findProjects('/fixed/path')).split('\\n');
+        }
+        """,
+    )
+    eps = recover_js_entrypoints(tmp_path)
+    assert not any(e.file.name == "project-finder.js" for e in eps)
+
+
+def test_transitive_recovery_terminates_on_import_cycle(tmp_path):
+    (tmp_path / "a.js").write_text(
+        "import { b } from './b.js';\n"
+        "export const tools = [{ name: 't', handler: async (args) => b(args.x) }];\n"
+    )
+    (tmp_path / "b.js").write_text(
+        "import { c } from './c.js';\nexport function b(v) { return c(v); }\n"
+    )
+    (tmp_path / "c.js").write_text(
+        "import { b } from './b.js';\nexport function c(w) { return b(w); }\n"
+    )
+    eps = recover_js_entrypoints(tmp_path)
+    assert any(e.file.name == "c.js" for e in eps)
+
+
+def test_transitive_recovery_is_depth_bounded(tmp_path):
+    """Chain a -> f1 -> ... -> f6: recovery adds hops 2-3 only (f2, f3);
+    f5 and f6 stay unreached."""
+    (tmp_path / "a.js").write_text(
+        "import { f1 } from './f1.js';\n"
+        "export const tools = [{ name: 't', handler: async (args) => f1(args.x) }];\n"
+    )
+    for i in range(1, 6):
+        (tmp_path / f"f{i}.js").write_text(
+            f"import {{ f{i+1} }} from './f{i+1}.js';\nexport function f{i}(v) {{ return f{i+1}(v); }}\n"
+        )
+    (tmp_path / "f6.js").write_text("export function f6(v) { return v; }\n")
+    names = {e.file.name for e in recover_js_entrypoints(tmp_path) if e.sdk_shape == "transitive_cross_file_hop"}
+    assert names == {"f2.js", "f3.js"}

@@ -2,6 +2,30 @@
 
 All notable changes to mcp-safeguard are documented here.
 
+## [0.11.0] - 2026-11-24
+
+Merges the research line (v30 / RC2) into the released scanner and keeps the 0.10.2 precision work.
+
+### Added
+- **SRC-037** dynamic code evaluation of a non-literal (`eval`, `new Function`, `vm`, `parse_expr`, `sympify`, `pickle`, `exec`).
+- **SRC-038** caller-controlled argv element passed to a flag-sensitive binary (git, ssh, curl, tar, npm, ...) with no `--`.
+- **SRC-039** security check enforced only when a local/single-user/dev predicate is false.
+- **SRC-040** hardcoded default administrator credentials.
+- **SRC-041** inbound bearer token reused on an outbound call with no audience check (token passthrough).
+- **SRC-046** OAuth proxy with static client_id + DCR and no per-client consent check (confused deputy).
+- **SRC-042..045 (experimental, labelled in the title)**: server-minted handle with no ownership binding, tool description rewritten on refresh, MRTR `requestState` with no integrity check, public `cacheScope` on per-user data.
+- **SS-004** unguarded fetch of a client-supplied metadata, JWKS or discovery URL (CIMD, `jku`, `jwks_uri`). HIGH only when the name is caller-chosen by definition (`client_id`, `jku`, `x5u`, `jwks_uri`) or request input is visible in the file; operator constants, env/config reads and a bare `.well-known` path are ignored; `issuer`/`metadata_url` with no visible caller input are MEDIUM leads.
+- Deployment-profile stage and fix-line post-selection in the LLM tier; transitive 2-3 hop serverless entrypoint recovery for JS/TS; V4 hunter and adversary prompts.
+
+### Changed
+- **SRC-019** reports every shell sink in a file (Node `exec*`, `spawn`/`execFile` with a shell, Python `os.system`/`subprocess` with a shell, Go `sh -c`), follows a command string built one assignment earlier, and still flags a caller parameter run through a shell. A bare `exec()` still counts only when `child_process` is imported.
+- **SRC-018** reports every unguarded join site and recognizes `arguments` / `tool_input` names.
+
+### Measured (rule scanner only, deterministic, no LLM tier)
+- Development set `mcp_holdout_bench_v1` (49 targets with line anchors; not a sealed holdout): strict line-anchor recall 5/49 (0.10) on 0.10.2 to 14/49 (0.29) on 0.11.0.
+- HIGH findings on 12 popular MCP servers: 34 on 0.10.2, 34 on 0.11.0 (none added). MEDIUM leads rose from 11 to 35, mostly SRC-037 and SRC-019 on tools that execute code by design.
+- 1144 tests pass.
+
 ## [0.10.2] - 2026-11-24
 
 ### Changed
