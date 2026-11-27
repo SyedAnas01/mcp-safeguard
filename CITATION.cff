@@ -8,8 +8,8 @@ abstract: >-
   misconfigurations across MCP server implementations.
 type: software
 authors:
-  - family-names: Mohiuddin
-    given-names: Syed Anas
+  - family-names: Syed
+    given-names: Anas Mohiuddin
     orcid: "https://orcid.org/0009-0005-3736-6430"
     email: anasmohiuddinsyed@gmail.com
     website: "https://cognivators.com/founder"
@@ -27,4 +27,7 @@ keywords:
   - LLM-security
 url: "https://pypi.org/project/mcp-safeguard/"
 # repository-code: set to the GitLab URL once the canonical repo is live
-# identifiers: add the Zenodo software DOI once minted
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.20502473
+    description: Zenodo concept DOI (all versions)
